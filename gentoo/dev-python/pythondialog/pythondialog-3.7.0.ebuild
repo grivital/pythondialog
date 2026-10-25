@@ -14,7 +14,7 @@ SRC_URI="https://github.com/grivital/pythondialog/releases/download/v${PV}/pytho
 
 LICENSE="LGPL-2.1+"
 SLOT="0"
-KEYWORDS="~amd64 ~x86"
+KEYWORDS="amd64 x86"
 IUSE=""
 
 RDEPEND="dev-util/dialog"

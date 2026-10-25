@@ -58,8 +58,8 @@ sudo emaint sync -r pythondialog-overlay   # после настройки repos
 sudo emerge -av dev-python/pythondialog
 ```
 
-Ebuild'ы: `pythondialog-3.6.0.ebuild` (`amd64 x86`) и
-`pythondialog-3.7.0.ebuild` (`~amd64 ~x86`). EAPI 8, `distutils-r1`,
+Ebuild'ы: `pythondialog-3.6.0.ebuild` и `pythondialog-3.7.0.ebuild`
+(оба `amd64 x86`). EAPI 8, `distutils-r1`,
 `DISTUTILS_USE_PEP517=setuptools`, `PYTHON_COMPAT=( python3_{11..14} pypy3 )`,
 `RDEPEND="dev-util/dialog"`. Исходники скачиваются из соответствующего GitHub
 Release (`v3.6.0`/`v3.7.0`); после изменения кода нужно пересобрать sdist,

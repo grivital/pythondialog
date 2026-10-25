@@ -2,7 +2,7 @@
 
 This directory is a self-contained Portage overlay providing
 `dev-python/pythondialog` (the maintained fork). It currently contains
-3.6.0 (stable keywords) and 3.7.0 (`~amd64 ~x86`).
+3.6.0 and 3.7.0, both with `amd64 x86` keywords.
 
 ## Adding the overlay
 

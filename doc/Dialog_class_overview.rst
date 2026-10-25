@@ -483,6 +483,12 @@ scheme.
 .. automethod:: Dialog.backend_version
 
 
+Chaining widgets in a single process
+------------------------------------
+
+.. automethod:: Dialog.perform_chain
+
+
 Enabling debug facilities
 -------------------------
 

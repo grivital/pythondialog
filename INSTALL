@@ -1,7 +1,7 @@
 INSTALLATION
 ============
 
-pythondialog 3.6.0 requires Python 3.10 or later and the dialog(1)
+pythondialog 3.7.0 requires Python 3.10 or later and the dialog(1)
 program (or a mostly-compatible replacement such as Xdialog).
 
 

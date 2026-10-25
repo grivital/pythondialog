@@ -1,5 +1,18 @@
 2026-10-25  Vitaly Grinin  <grivital@yandex.ru>
 
+	Release 3.7.0
+
+	* Add Dialog.perform_chain() for running several widgets in one
+	  dialog process with --and-widget.
+	* Add common options output_separator (and its separator alias),
+	  quoted and single_quoted. The output parsers now honor them for
+	  list, form, menu, treeview and input widgets, including
+	  --help-status output.
+	* Add a GitHub Actions workflow running the tests on Python
+	  3.10-3.14, lint checks and the Sphinx documentation build.
+
+2026-10-25  Vitaly Grinin  <grivital@yandex.ru>
+
 	Release 3.6.0
 
 	* Require Python 3.10+; remove Python 2/3.2 compatibility branches.

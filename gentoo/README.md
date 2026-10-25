@@ -1,7 +1,8 @@
 # Gentoo overlay for pythondialog
 
 This directory is a self-contained Portage overlay providing
-`dev-python/pythondialog` 3.6.0 (the maintained fork).
+`dev-python/pythondialog` (the maintained fork). It currently contains
+3.6.0 (stable keywords) and 3.7.0 (`~amd64 ~x86`).
 
 ## Adding the overlay
 
@@ -34,9 +35,9 @@ sudo ln -s /path/to/pythondialog/gentoo /var/db/repos/pythondialog-overlay
 
 ## Building and updating the Manifest
 
-The ebuild fetches the sdist attached to the GitHub release `v3.6.0`.
-After changing the source or version, build the sdist and refresh the
-Manifest from the project root:
+The ebuild fetches the sdist attached to the matching GitHub release
+(`v3.6.0` or `v3.7.0`). After changing the source or version, build the
+sdist and refresh the Manifest from the project root:
 
 ```bash
 make manifest

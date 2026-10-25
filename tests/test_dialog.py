@@ -10,6 +10,7 @@ No third-party test framework is required.
 
 import os
 import pathlib
+import tempfile
 import unittest
 import warnings
 from unittest import mock
@@ -23,8 +24,8 @@ FAKE_DIALOG = HERE / "fake_dialog.py"
 
 class TestVersionInfo(unittest.TestCase):
     def test_str_and_repr(self):
-        self.assertEqual(str(dialog.version_info), "3.6.0")
-        self.assertEqual(dialog.__version__, "3.6.0")
+        self.assertEqual(str(dialog.version_info), "3.7.0")
+        self.assertEqual(dialog.__version__, "3.7.0")
         self.assertIn("VersionInfo", repr(dialog.version_info))
 
     def test_release_suffix(self):
@@ -118,6 +119,10 @@ class TestCommonArgs(unittest.TestCase):
             "iso_week": (True, ["--iso-week"]),
             "no_hot_list": (True, ["--no-hot-list"]),
             "output_fd": (4, ["--output-fd", "4"]),
+            "output_separator": (";", ["--output-separator", ";"]),
+            "separator": ("|", ["--output-separator", "|"]),
+            "quoted": (True, ["--quoted"]),
+            "single_quoted": (True, ["--single-quoted"]),
             "reorder": (True, ["--reorder"]),
         }
         for name, (value, expected) in cases.items():
@@ -159,6 +164,62 @@ class TestParseHelp(unittest.TestCase):
     def test_empty_help_with_help_status(self):
         with self.assertRaises(dialog.PythonDialogBug):
             self.d._parse_help("", {"help_status": True})
+
+    def test_help_status_output_separator(self):
+        self.assertEqual(
+            self.d._parse_help(
+                "HELP tag;sel1;sel2;",
+                {"help_status": True, "output_separator": ";"},
+                multival=True, default_separator="\n", strip_trailing=True),
+            ("tag", ["sel1", "sel2"]))
+
+    def test_help_status_quoted(self):
+        self.assertEqual(
+            self.d._parse_help(
+                'HELP "help id" "sel 1" "sel 2"',
+                {"help_status": True, "quoted": True},
+                multival=True, default_separator=" ", always_quoted=True),
+            ("help id", ["sel 1", "sel 2"]))
+
+    def test_help_status_single_quoted(self):
+        self.assertEqual(
+            self.d._parse_help(
+                "HELP 'help id' 'sel 1' 'sel 2'",
+                {"help_status": True, "single_quoted": True},
+                multival=True, default_separator=" ", always_quoted=True),
+            ("help id", ["sel 1", "sel 2"]))
+
+    def test_help_single_value_quoted(self):
+        self.assertEqual(
+            self.d._parse_help(
+                'HELP "tag with space" "status text"',
+                {"help_status": True, "quoted": True},
+                default_separator=" ", always_quoted=True),
+            ("tag with space", "status text"))
+
+    def test_split_fields(self):
+        self.assertEqual(
+            self.d._split_fields('"a b" "c d"', " ", '"'),
+            ["a b", "c d"])
+        self.assertEqual(self.d._split_fields("a,b,c", ",", '"'),
+                         ["a", "b", "c"])
+        self.assertEqual(self.d._split_fields('"a,b",c', ",", '"'),
+                         ["a,b", "c"])
+        self.assertEqual(self.d._split_fields('"a\\"b",c', ",", '"'),
+                         ['a"b', "c"])
+
+    def test_unquote_string(self):
+        self.assertEqual(
+            self.d._unquote_string('"a b"', {"quoted": True}), "a b")
+        self.assertEqual(
+            self.d._unquote_string(
+                "'a b'", {"quoted": True, "single_quoted": True}), "a b")
+        # --single-quoted alone does not enable quoting.
+        self.assertEqual(
+            self.d._unquote_string("'a b'", {"single_quoted": True}),
+            "'a b'")
+        # Without the option, quotes are literal.
+        self.assertEqual(self.d._unquote_string('"a b"', {}), '"a b"')
 
 
 class TestFakeBackend(unittest.TestCase):
@@ -234,6 +295,240 @@ class TestFakeBackend(unittest.TestCase):
         with mock.patch.dict(os.environ, {"FAKE_DIALOG_OUTPUT": "not-int"}):
             with self.assertRaises(dialog.UnexpectedDialogOutput):
                 d.rangebox("?", min=0, max=10, init=5)
+
+
+class TestOutputOptions(unittest.TestCase):
+    def make_dialog(self):
+        return dialog.Dialog(dialog=str(FAKE_DIALOG),
+                             pass_args_via_file=False)
+
+    def test_checklist_output_separator(self):
+        d = self.make_dialog()
+        with mock.patch.dict(os.environ,
+                             {"FAKE_DIALOG_LIST_VALUES": "tag 1,tag 2"}):
+            self.assertEqual(
+                d.checklist(
+                    "?", choices=[("tag 1", "item", True),
+                                  ("tag 2", "item", False)],
+                    output_separator=";"),
+                (dialog.Dialog.OK, ["tag 1", "tag 2"]))
+
+    def test_checklist_quoted(self):
+        d = self.make_dialog()
+        with mock.patch.dict(os.environ,
+                             {"FAKE_DIALOG_LIST_VALUES": "tag 1,tag 2"}):
+            self.assertEqual(
+                d.checklist(
+                    "?", choices=[("tag 1", "item", True),
+                                  ("tag 2", "item", False)],
+                    output_separator=";", quoted=True),
+                (dialog.Dialog.OK, ["tag 1", "tag 2"]))
+
+    def test_checklist_single_quoted(self):
+        d = self.make_dialog()
+        with mock.patch.dict(os.environ,
+                             {"FAKE_DIALOG_LIST_VALUES": "tag 1,tag 2"}):
+            self.assertEqual(
+                d.checklist(
+                    "?", choices=[("tag 1", "item", True),
+                                  ("tag 2", "item", False)],
+                    output_separator=";", quoted=True, single_quoted=True),
+                (dialog.Dialog.OK, ["tag 1", "tag 2"]))
+
+    def test_buildlist_default_quoting(self):
+        d = self.make_dialog()
+        with mock.patch.dict(os.environ,
+                             {"FAKE_DIALOG_LIST_VALUES": "tag 1,tag 2"}):
+            self.assertEqual(
+                d.buildlist("?", items=[("tag 1", "item", True),
+                                        ("tag 2", "item", False)]),
+                (dialog.Dialog.OK, ["tag 1", "tag 2"]))
+
+    def test_buildlist_single_quoted(self):
+        d = self.make_dialog()
+        with mock.patch.dict(os.environ,
+                             {"FAKE_DIALOG_LIST_VALUES": "tag 1,tag 2"}):
+            self.assertEqual(
+                d.buildlist("?", items=[("tag 1", "item", True),
+                                        ("tag 2", "item", False)],
+                            single_quoted=True),
+                (dialog.Dialog.OK, ["tag 1", "tag 2"]))
+
+    def test_buildlist_custom_separator(self):
+        d = self.make_dialog()
+        with mock.patch.dict(os.environ,
+                             {"FAKE_DIALOG_LIST_VALUES": "tag 1,tag 2"}):
+            self.assertEqual(
+                d.buildlist("?", items=[("tag 1", "item", True),
+                                        ("tag 2", "item", False)],
+                            output_separator=",", quoted=True),
+                (dialog.Dialog.OK, ["tag 1", "tag 2"]))
+
+    def test_form_quoted(self):
+        d = self.make_dialog()
+        elements = [("Label1", 1, 1, "v1", 1, 10, 10, 10),
+                    ("Label2", 2, 1, "v2", 2, 10, 10, 10)]
+        with mock.patch.dict(os.environ,
+                             {"FAKE_DIALOG_FORM_VALUES": "value 1,value 2"}):
+            self.assertEqual(
+                d.form("?", elements=elements, quoted=True),
+                (dialog.Dialog.OK, ["value 1", "value 2"]))
+
+    def test_editbox_output_separator(self):
+        d = self.make_dialog()
+        with mock.patch.dict(os.environ,
+                             {"FAKE_DIALOG_EDITBOX_LINES": "line 1,line 2"}):
+            self.assertEqual(
+                d.editbox("/tmp/file", output_separator="|"),
+                (dialog.Dialog.OK, "line 1\nline 2\n"))
+
+    def test_menu_quoted(self):
+        d = self.make_dialog()
+        with mock.patch.dict(os.environ,
+                             {"FAKE_DIALOG_MENU_VALUE": "tag with space"}):
+            self.assertEqual(
+                d.menu("?", choices=[("tag with space", "item")],
+                       quoted=True),
+                (dialog.Dialog.OK, "tag with space"))
+
+    def test_inputbox_quoted(self):
+        d = self.make_dialog()
+        with mock.patch.dict(os.environ,
+                             {"FAKE_DIALOG_INPUT": "hello world"}):
+            self.assertEqual(d.inputbox("?", quoted=True),
+                             (dialog.Dialog.OK, "hello world"))
+
+    def test_radiolist_quoted(self):
+        d = self.make_dialog()
+        with mock.patch.dict(os.environ,
+                             {"FAKE_DIALOG_LIST_VALUES": "tag with space"}):
+            self.assertEqual(
+                d.radiolist("?", choices=[("tag with space", "item", True)],
+                            quoted=True),
+                (dialog.Dialog.OK, "tag with space"))
+
+    def test_treeview_quoted(self):
+        d = self.make_dialog()
+        with mock.patch.dict(os.environ,
+                             {"FAKE_DIALOG_LIST_VALUES": "tag with space"}):
+            self.assertEqual(
+                d.treeview("?", nodes=[("tag with space", "item", True, 0)],
+                           quoted=True),
+                (dialog.Dialog.OK, "tag with space"))
+
+    def test_inputmenu_renamed_quoted(self):
+        d = self.make_dialog()
+        env = {"FAKE_DIALOG_INPUTMENU_RENAMED": "1",
+               "FAKE_DIALOG_INPUTMENU_TAG": "tag 1",
+               "FAKE_DIALOG_INPUTMENU_ITEM": "new item"}
+        with mock.patch.dict(os.environ, env):
+            self.assertEqual(
+                d.inputmenu("?", choices=[("tag 1", "item")], quoted=True),
+                ("renamed", "tag 1", "new item"))
+
+
+class TestChain(unittest.TestCase):
+    def make_dialog(self, **kwargs):
+        kwargs.setdefault("pass_args_via_file", False)
+        return dialog.Dialog(dialog=str(FAKE_DIALOG), **kwargs)
+
+    def test_arguments(self):
+        d = self.make_dialog()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = os.path.join(tmpdir, "argv")
+            with mock.patch.dict(os.environ,
+                                 {"FAKE_DIALOG_ARGV_FILE": path}):
+                d.perform_chain([
+                    (["--inputbox", "Name:", "10", "40"], {"title": "One"}),
+                    (["--menu", "Choose:", "10", "40", "2", "tag", "item"],
+                     {"title": "Two"}),
+                ])
+            with open(path, encoding="utf-8") as f:
+                args = f.read().splitlines()
+
+        self.assertIn("--and-widget", args)
+        self.assertIn("--separate-widget", args)
+        self.assertIn("One", args)
+        self.assertIn("Two", args)
+        self.assertLess(args.index("--separate-widget"),
+                        args.index("--inputbox"))
+        self.assertLess(args.index("--inputbox"),
+                        args.index("--and-widget"))
+        self.assertLess(args.index("--and-widget"),
+                        args.index("--menu"))
+
+    def test_two_widgets(self):
+        d = self.make_dialog()
+        code, segments = d.perform_chain([
+            (["--inputbox", "Name:", "10", "40"], {}),
+            (["--menu", "Choose:", "10", "40", "2", "tag", "item"], {}),
+        ])
+        self.assertEqual((code, segments),
+                         (dialog.Dialog.OK, ["hello", "tag"]))
+
+    def test_two_widgets_via_file(self):
+        d = self.make_dialog(pass_args_via_file=True)
+        code, segments = d.perform_chain([
+            (["--inputbox", "Name:", "10", "40"], {}),
+            (["--menu", "Choose:", "10", "40", "2", "tag", "item"], {}),
+        ])
+        self.assertEqual((code, segments),
+                         (dialog.Dialog.OK, ["hello", "tag"]))
+
+    def test_cancel_continues_and_last_code(self):
+        d = self.make_dialog()
+        code, segments = d.perform_chain([
+            (["--inputbox", "Name:", "10", "40"], {}),
+            (["--menu", "Choose:", "10", "40", "2", "tag", "item"], {}),
+            (["--yesno", "Again?", "10", "40"], {}),
+        ])
+        self.assertEqual((code, segments),
+                         (dialog.Dialog.CANCEL, ["hello", "tag"]))
+
+    def test_esc_stops(self):
+        d = self.make_dialog()
+        with mock.patch.dict(os.environ, {"FAKE_DIALOG_ESC": "1"}):
+            code, segments = d.perform_chain([
+                (["--inputbox", "Name:", "10", "40"], {}),
+                (["--menu", "Choose:", "10", "40", "2", "tag", "item"], {}),
+                (["--inputbox", "After:", "10", "40"], {}),
+            ])
+        self.assertEqual((code, segments),
+                         (dialog.Dialog.ESC, ["hello"]))
+
+    def test_custom_separator(self):
+        d = self.make_dialog()
+        code, segments = d.perform_chain([
+            (["--inputbox", "Name:", "10", "40"], {}),
+            (["--menu", "Choose:", "10", "40", "2", "tag", "item"], {}),
+        ], separator="|")
+        self.assertEqual((code, segments),
+                         (dialog.Dialog.OK, ["hello", "tag"]))
+
+    def test_empty(self):
+        d = self.make_dialog()
+        with self.assertRaises(dialog.BadPythonDialogUsage):
+            d.perform_chain([])
+
+    def test_rejects_separate_output(self):
+        d = self.make_dialog()
+        with self.assertRaises(dialog.BadPythonDialogUsage):
+            d.perform_chain([
+                (["--msgbox", "x", "10", "40"],
+                 {"separate_output": True})])
+
+    def test_rejects_separate_widget(self):
+        d = self.make_dialog()
+        with self.assertRaises(dialog.BadPythonDialogUsage):
+            d.perform_chain([
+                (["--msgbox", "x", "10", "40"],
+                 {"separate_widget": "|"})])
+
+    def test_rejects_and_widget_in_args(self):
+        d = self.make_dialog()
+        with self.assertRaises(dialog.BadPythonDialogUsage):
+            d.perform_chain([
+                (["--and-widget", "--msgbox", "x", "10", "40"], {})])
 
 
 class TestUsageErrors(unittest.TestCase):

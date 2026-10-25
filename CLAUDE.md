@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 pythondialog — Python-обёртка над UNIX-утилитой `dialog` (ncurses TUI).
 Основной код — один модуль `dialog.py` (~3800 строк) без сторонних зависимостей.
-Это поддерживаемый форк: https://github.com/grivital/pythondialog (версия 3.6.0,
+Это поддерживаемый форк: https://github.com/grivital/pythondialog (версия 3.7.0,
 Python >= 3.10). Упаковка — PEP 517/621 (`pyproject.toml`, setuptools).
 
 ## Команды
@@ -42,7 +42,9 @@ PYTHONPATH=. python3 examples/demo.py --debug --debug-file=/tmp/debug.log
 
 Тестового фреймворка нет специально: стандартный `unittest`, имитатор
 `tests/fake_dialog.py` понимает `--file`, `--print-version`, основные виджеты,
-`--help`, `--gauge` и позволяет проверять fork/exec, pipe и парсинг без TTY.
+`--help`, `--gauge`, quoting/output-separator и `--and-widget`, позволяя
+проверять fork/exec, pipe и парсинг без TTY. CI — `.github/workflows/tests.yml`
+(Python 3.10–3.14, тесты, `ruff`, Sphinx, sdist).
 
 ### Gentoo
 
@@ -50,16 +52,18 @@ PYTHONPATH=. python3 examples/demo.py --debug --debug-file=/tmp/debug.log
 
 ```bash
 make sdist
-cd gentoo/dev-python/pythondialog
-DISTDIR="$OLDPWD/dist" ebuild pythondialog-3.6.0.ebuild manifest
+make manifest
+sudo make distfile      # при необходимости, если ebuild не скачивает релиз
 sudo emaint sync -r pythondialog-overlay   # после настройки repos.conf
 sudo emerge -av dev-python/pythondialog
 ```
 
-Ebuild: EAPI 8, `distutils-r1`, `DISTUTILS_USE_PEP517=setuptools`,
-`PYTHON_COMPAT=( python3_{11..14} pypy3 )`, `RDEPEND="dev-util/dialog"`.
-Исходники скачиваются из GitHub Release `v3.6.0`; после изменения кода
-нужно пересобрать sdist, выпустить релиз и обновить `Manifest`.
+Ebuild'ы: `pythondialog-3.6.0.ebuild` (`amd64 x86`) и
+`pythondialog-3.7.0.ebuild` (`~amd64 ~x86`). EAPI 8, `distutils-r1`,
+`DISTUTILS_USE_PEP517=setuptools`, `PYTHON_COMPAT=( python3_{11..14} pypy3 )`,
+`RDEPEND="dev-util/dialog"`. Исходники скачиваются из соответствующего GitHub
+Release (`v3.6.0`/`v3.7.0`); после изменения кода нужно пересобрать sdist,
+выпустить релиз и обновить `Manifest` (`make manifest`).
 
 ## Архитектура `dialog.py`
 
@@ -75,9 +79,10 @@ Ebuild: EAPI 8, `distutils-r1`, `DISTUTILS_USE_PEP517=setuptools`,
    лямбда, формирующая флаги `dialog`), `_compute_common_args()`,
    `_dash_escape*`. Неизвестная опция даёт `BadPythonDialogUsage`.
    Подчёркивания соответствуют дефисам, булевы опции передаются только при
-   истинном значении. Часть опций, влияющих на формат вывода
-   (`--output-separator`, `--quoted`, `--single-quoted`, `--no-items`,
-   `--last-key`, `--and-widget`), намеренно не добавлена — см. `TODO`.
+   истинном значении. `--output-separator`/`--separator`, `--quoted` и
+   `--single-quoted` поддержаны и учитываются парсерами (`_split_fields`,
+   `_split_output_fields`, `_unquote_string`, `_parse_help`). `--no-items`,
+   `--last-key` и `--print-text-*` пока не поддержаны — см. `TODO`.
 3. **Версия бэкенда** — `BackendVersion` (ABC), `DialogBackendVersion`
    (сравнение по dotted part + rest). В `Dialog.__init__` вызывается
    `backend_version()` (`dialog --print-version`), результат кэшируется в
@@ -88,7 +93,10 @@ Ebuild: EAPI 8, `distutils-r1`, `DISTUTILS_USE_PEP517=setuptools`,
    (`func.retval_is_code`). Эти атрибуты публично значимы: `examples/demo.py`
    (`MyDialog.__getattr__`) и сторонний код строят на них обёртки.
 5. **Класс `Dialog`** — каждый виджет собирает список `cmd` и вызывает
-   `_perform()`.
+   `_perform()`. `perform_chain()` — низкоуровневый примитив для нескольких
+   виджетов в одном процессе (`--and-widget`): получает пары
+   `(cmdargs, common_options)`, сам управляет `--separate-widget` и
+   возвращает `(code, segments)`; парсинг сегментов остаётся на вызывающем.
 
 ### Цепочка вызова
 
@@ -124,8 +132,11 @@ widget-метод
 
 Виджеты возвращают либо сам код, либо кортеж, первым элементом которого он
 является. `--help`-вывод разбирается `_parse_help()` (учитывает
-`--help-status`, `--item-help`, `--help-tags`); пустой вывод при включённом
-`--help-status` — это `PythonDialogBug`.
+`--help-status`, `--item-help`, `--help-tags`, `--output-separator`, quoting);
+пустой вывод при включённом `--help-status` — это `PythonDialogBug`.
+Особенность семантики: `--single-quoted` только выбирает символ кавычки,
+включает же квотирование `--quoted` (или виджет, который цитирует всегда —
+buildlist/treeview без `--separate-output`).
 
 ### Потоковые виджеты
 

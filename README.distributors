@@ -3,7 +3,7 @@
 Packaging notes
 ===============
 
-pythondialog 3.6.0 is packaged with PEP 517/621 metadata
+pythondialog 3.7.0 is packaged with PEP 517/621 metadata
 (pyproject.toml, setuptools build backend). There is no setup.py
 anymore.
 

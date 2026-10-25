@@ -37,9 +37,12 @@ distfile:
 	install -m 0644 dist/pythondialog-*.tar.gz "$(DISTDIR)/"
 
 # Regenerate the ebuild Manifest using the local sdist (no root needed).
+# The newest ebuild is used; ebuild(1) keeps entries for older versions that
+# are present in DISTDIR.
 manifest: sdist
 	cd $(EBUILD_DIR) && \
-		DISTDIR="$(abspath dist)" ebuild --force pythondialog-*.ebuild manifest
+		DISTDIR="$(abspath dist)" \
+		ebuild --force $$(ls -1 *.ebuild | sort -V | tail -1) manifest
 
 clean:
 	rm -rf build dist doc/_build .ruff_cache __pycache__ tests/__pycache__

@@ -1,13 +1,6 @@
-* Support --and-widget chaining. This requires a different execution
-  model: one dialog process displays several widgets, and the output of
-  each widget is separated with --separate-widget. Pythondialog
-  currently runs one process per widget.
-
-* Support the output-affecting options --output-separator (and its
-  --separator alias), --quoted, --single-quoted, --no-items and
-  --last-key. They are understood by dialog, but exposing them as common
-  options without extending every output parser would silently corrupt
-  widget return values.
+* Support the --no-items and --last-key options. They change the input
+  row format or append the last key to the output; exposing them without
+  changing every widget's argument conventions would be misleading.
 
 * Add convenience methods for --print-text-only and --print-text-size.
 

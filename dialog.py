@@ -39,6 +39,7 @@ import os
 import re
 import tempfile
 import traceback
+import uuid
 import warnings
 from contextlib import contextmanager
 from shlex import quote as _shell_quote
@@ -69,7 +70,7 @@ class VersionInfo(_VersionInfo):
 #: Version of pythondialog as a :class:`VersionInfo` instance.
 #:
 #: .. versionadded:: 2.14
-version_info = VersionInfo(3, 6, 0, None)
+version_info = VersionInfo(3, 7, 0, None)
 #: Version of pythondialog as a string.
 #:
 #: .. versionadded:: 2.12
@@ -391,6 +392,9 @@ _common_args_syntax = {
     # reads that fd (or uses the same fd pythondialog captures, normally 2),
     # widget results will be lost. The fd must be inheritable.
     "output_fd": lambda fd: _dash_escape_nf(("--output-fd", str(fd))),
+    # Separator used between values produced by list/form widgets. The
+    # parsers honor it; see also Dialog.perform_chain().
+    "output_separator": lambda s: _dash_escape_nf(("--output-separator", s)),
     # cf. Dialog.maxsize()
     "print_maxsize": lambda enable: _simple_option("--print-maxsize",
                                                    enable),
@@ -398,12 +402,16 @@ _common_args_syntax = {
     # cf. Dialog.backend_version()
     "print_version": lambda enable: _simple_option("--print-version",
                                                    enable),
+    "quoted": lambda enable: _simple_option("--quoted", enable),
     "reorder": lambda enable: _simple_option("--reorder", enable),
     "scrollbar": lambda enable: _simple_option("--scrollbar", enable),
     "separate_output": lambda enable: _simple_option("--separate-output",
                                                      enable),
     "separate_widget": lambda s: _dash_escape_nf(("--separate-widget", s)),
+    # Alias for --output-separator, still accepted by dialog(1)
+    "separator": lambda s: _dash_escape_nf(("--output-separator", s)),
     "shadow": lambda enable: _simple_option("--shadow", enable),
+    "single_quoted": lambda enable: _simple_option("--single-quoted", enable),
     # Obsolete according to dialog(1)
     "size_err": lambda enable: _simple_option("--size-err", enable),
     "sleep": lambda secs: _dash_escape_nf(("--sleep", str(secs))),
@@ -1569,6 +1577,115 @@ class Dialog:
 
         return (exit_code, output)
 
+    def perform_chain(self, widgets, *, separator=None,
+                      use_persistent_args=True):
+        """Run several widgets in one :program:`dialog` process.
+
+        :param widgets:
+          a non-empty sequence of :samp:`({cmdargs}, {options})` pairs.
+          *cmdargs* is the argument list for one widget, exactly as it
+          would be passed to :meth:`_perform` (for instance
+          ``["--inputbox", "Name:", "10", "40"]``).  *options* is a dict
+          of :term:`dialog common options <dialog common options>` for
+          that widget (``title``, ``begin``, ...).
+        :param str separator:
+          string used for the :option:`--separate-widget` option.  A
+          unique token is generated when it is ``None`` (the default).
+        :param bool use_persistent_args:
+          whether to pass the arguments registered with
+          :meth:`add_persistent_args` (default: ``True``).
+        :return:
+          a tuple :samp:`({code}, {segments})` where *code* is the
+          :term:`Dialog exit code` of the last widget that ran, and
+          *segments* is the raw output split on *separator*.
+
+        The widgets are chained with :option:`--and-widget`, so
+        :program:`dialog` proceeds to the next widget after
+        :guilabel:`Cancel`/:guilabel:`No`; only :kbd:`Esc` (or an error)
+        stops the chain.  The returned *segments* need care:
+
+          - widgets that cannot produce output (e.g. :meth:`yesno`,
+            :meth:`msgbox`, :meth:`infobox`) do not contribute a segment;
+          - a widget that returns :attr:`Dialog.CANCEL` contributes an
+            empty segment, but the chain still continues;
+          - if :kbd:`Esc` is pressed, the widget that returned
+            :attr:`Dialog.ESC` does not contribute a segment and the
+            following widgets are not run;
+          - if a widget's own output contains *separator*, the
+            segmentation is ambiguous; choose another *separator* in that
+            case.
+
+        Output-affecting options that suppress :program:`dialog`'s
+        inter-widget separator (:option:`--separate-output`) or replace
+        it (:option:`--separate-widget`) are rejected; this method sets
+        :option:`--separate-widget` itself.
+
+        This is a low-level primitive: it does not parse widget-specific
+        output.  Use the regular widget methods when you don't need
+        several widgets in a single process.
+
+        Notable exceptions:
+
+          - :exc:`BadPythonDialogUsage`
+          - any exception raised by :meth:`Dialog._perform`
+
+        .. versionadded:: 3.7
+
+        """
+        widgets = list(widgets)
+        if not widgets:
+            raise BadPythonDialogUsage(
+                "perform_chain() requires at least one widget")
+
+        if separator is None:
+            separator = "--pythondialog-chain-{0}--".format(
+                uuid.uuid4().hex)
+        elif not isinstance(separator, str):
+            raise BadPythonDialogUsage(
+                "the 'separator' argument of perform_chain() must be a "
+                "string, but {0!r} is not".format(separator))
+
+        if (use_persistent_args
+                and "--separate-widget" in self.dialog_persistent_arglist):
+            raise BadPythonDialogUsage(
+                "perform_chain() manages --separate-widget itself; remove "
+                "it from the persistent arguments")
+
+        chain_args = ["--separate-widget", separator]
+
+        for index, (cmdargs, options) in enumerate(widgets):
+            cmdargs = list(cmdargs)
+            options = dict(options or {})
+
+            if not cmdargs:
+                raise BadPythonDialogUsage(
+                    "widget {0} has an empty argument list".format(index))
+            if "--and-widget" in cmdargs:
+                raise BadPythonDialogUsage(
+                    "do not pass --and-widget in perform_chain() "
+                    "arguments")
+            if ("separate_widget" in options
+                    or "--separate-widget" in cmdargs):
+                raise BadPythonDialogUsage(
+                    "perform_chain() manages --separate-widget itself")
+            if options.get("separate_output") \
+                    or "--separate-output" in cmdargs:
+                raise BadPythonDialogUsage(
+                    "--separate-output suppresses dialog's inter-widget "
+                    "separator and cannot be used with perform_chain()")
+
+            if index:
+                chain_args.append("--and-widget")
+            chain_args.extend(_compute_common_args(options))
+            chain_args.extend(self.dash_escape_nf(cmdargs))
+
+        code, output = self._perform(
+            chain_args, dash_escape="none",
+            use_persistent_args=use_persistent_args)
+
+        segments = [] if not output else output.split(separator)
+        return (code, segments)
+
     def _strip_xdialog_newline(self, output):
         """Remove trailing newline (if any) in \
 :program:`Xdialog`-compatibility mode"""
@@ -1606,16 +1723,17 @@ class Dialog:
         return ("--help-status" in self.dialog_persistent_arglist
                 or kwargs.get("help_status", False))
 
-    def _parse_quoted_string(self, s, start=0):
+    def _parse_quoted_string(self, s, start=0, quote='"'):
         """Parse a quoted string from a :program:`dialog` help output."""
-        if start >= len(s) or s[start] != '"':
-            raise PythonDialogBug("quoted string does not start with a double "
-                                  "quote: {0!r}".format(s))
+        if start >= len(s) or s[start] != quote:
+            raise PythonDialogBug(
+                "quoted string does not start with {0!r}: {1!r}".format(
+                    quote, s))
 
         l = []
         i = start + 1
 
-        while i < len(s) and s[i] != '"':
+        while i < len(s) and s[i] != quote:
             if s[i] == "\\":
                 i += 1
                 if i >= len(s):
@@ -1624,29 +1742,30 @@ class Dialog:
             l.append(s[i])
             i += 1
 
-        if i >= len(s) or s[i] != '"':
-            raise PythonDialogBug("quoted string does not end with a double "
-                                  "quote: {0!r}".format(s))
+        if i >= len(s) or s[i] != quote:
+            raise PythonDialogBug(
+                "quoted string does not end with {0!r}: {1!r}".format(
+                    quote, s))
 
         return (''.join(l), i+1)
 
-    def _split_shellstyle_arglist(self, s):
+    def _quote_char(self, kwargs):
+        """Return the quote character selected by the common options."""
+        return "'" if kwargs.get("single_quoted") else '"'
+
+    def _split_shellstyle_arglist(self, s, quote='"'):
         """Split an argument list with shell-style quoting performed \
 by :program:`dialog`.
 
-        Any argument in 's' may or may not be quoted. Quoted
-        arguments are always expected to be enclosed in double quotes
-        (more restrictive than what the POSIX shell allows).
+        Any argument in 's' may or may not be quoted. Quoted arguments
+        are expected to be enclosed in *quote* (``"`` by default, or
+        ``'`` when ``single_quoted=True`` is used).
 
-        This function could maybe be replaced with shlex.split(),
-        however:
-          - shlex only handles Unicode strings in Python 2.7.3 and
-            above;
-          - the bulk of the work is done by _parse_quoted_string(),
-            which is probably still needed in _parse_help(), where
-            one needs to parse things such as 'HELP <id> <status>' in
-            which <id> may be quoted but <status> is never quoted,
-            even if it contains spaces or quotes.
+        The bulk of the work is done by :meth:`_parse_quoted_string`,
+        which is also needed in :meth:`_parse_help`, where one has to
+        parse things such as ``HELP <id> <status>`` in which *id* may be
+        quoted but *status* is never quoted, even if it contains spaces
+        or quotes.
 
         """
         s = s.rstrip()
@@ -1654,8 +1773,8 @@ by :program:`dialog`.
         i = 0
 
         while i < len(s):
-            if s[i] == '"':
-                arg, i = self._parse_quoted_string(s, start=i)
+            if s[i] == quote:
+                arg, i = self._parse_quoted_string(s, start=i, quote=quote)
                 if i < len(s) and s[i] != ' ':
                     raise PythonDialogBug(
                         "expected a space or end-of-string after quoted "
@@ -1675,8 +1794,93 @@ by :program:`dialog`.
 
         return l
 
+    def _split_fields(self, s, separator, quote):
+        """Split *s* by *separator*, honouring quoted fields."""
+        fields = []
+        i = 0
+        n = len(s)
+
+        while True:
+            if i < n and s[i] == quote:
+                value, i = self._parse_quoted_string(s, start=i, quote=quote)
+                fields.append(value)
+            else:
+                end = s.find(separator, i) if separator else -1
+                if end < 0:
+                    end = n
+                fields.append(s[i:end])
+                i = end
+
+            if i >= n:
+                break
+
+            if not separator or not s.startswith(separator, i):
+                raise UnexpectedDialogOutput(
+                    "unexpected character after a field in dialog output: "
+                    "{0!r}".format(s))
+
+            i += len(separator)
+            if i == n:
+                fields.append("")
+                break
+
+        return fields
+
+    def _unquote_string(self, s, kwargs, *, always_quoted=False):
+        """Remove dialog's shell-style quoting from a single value."""
+        # --single-quoted only selects the quote character; it does not
+        # enable quoting by itself (--quoted does).
+        if not (always_quoted or kwargs.get("quoted")):
+            return s
+
+        quote = self._quote_char(kwargs)
+        if not s.startswith(quote):
+            return s
+
+        value, end = self._parse_quoted_string(s, quote=quote)
+        if s[end:].strip():
+            raise UnexpectedDialogOutput(
+                "unexpected trailing data after a quoted string: {0!r}"
+                .format(s))
+        return value
+
+    def _output_separator(self, kwargs, default):
+        """Return the value of --output-separator (or its alias)."""
+        if "output_separator" in kwargs:
+            return kwargs["output_separator"]
+        if "separator" in kwargs:
+            return kwargs["separator"]
+        return default
+
+    def _split_output_fields(self, s, kwargs, default_separator, *,
+                             always_quoted=False, strip_trailing=False,
+                             strip_leading=False):
+        """Split widget output according to the common output options."""
+        separator = self._output_separator(kwargs, default_separator)
+        # --single-quoted only selects the quote character; --quoted (or a
+        # widget that always quotes) enables quoting.
+        quoted = bool(always_quoted or kwargs.get("quoted"))
+
+        if strip_leading and separator and s.startswith(separator):
+            s = s[len(separator):]
+
+        if quoted:
+            fields = self._split_fields(s, separator,
+                                        self._quote_char(kwargs))
+        elif separator:
+            fields = s.split(separator)
+        else:
+            fields = [s]
+
+        if strip_trailing and fields and fields[-1] == "":
+            fields.pop()
+
+        return fields
+
     def _parse_help(self, output, kwargs, *, multival=False,
-                    multival_on_single_line=False, raw_format=False):
+                    multival_on_single_line=False, raw_format=False,
+                    always_quoted=False, default_separator=None,
+                    strip_trailing=False):
         """Parse the dialog help output from a widget.
 
         'kwargs' should contain the keyword arguments used in the
@@ -1687,6 +1891,16 @@ by :program:`dialog`.
 
         'raw_format' is for widgets that don't start their help
         output with the string "HELP ".
+
+        'always_quoted' means that dialog always quotes values for this
+        widget, independently of the ``--quoted`` option.
+
+        'default_separator' is the separator used when the caller did not
+        pass ``--output-separator``; ``None`` selects a space for
+        single-valued (or single-line) output and a newline otherwise.
+
+        'strip_trailing' removes the empty field produced by widgets that
+        append a separator after their last value.
 
         """
         l = output.splitlines()
@@ -1713,59 +1927,57 @@ by :program:`dialog`.
             return None
 
         # The widgets that actually use --help-status always have the first
-        # help line indicating the active item; there is no risk of
-        # confusing this line with the first line produced by --help-status.
-        if not l[0].startswith("HELP "):
+        # help line indicating the active item.
+        if not output.startswith("HELP "):
             raise PythonDialogBug(
                 "unexpected help output that does not start with 'HELP ': "
                 "{0!r}".format(output))
 
-        # Everything that follows "HELP "; what it contains depends on whether
-        # --item-help and/or --help-tags were passed to dialog.
-        s = l[0][5:]
+        payload = output[5:].rstrip("\n")
+
+        if default_separator is None:
+            if multival_on_single_line or not multival:
+                default_separator = " "
+            else:
+                default_separator = "\n"
 
         if not self._help_status_on(kwargs):
-            return s
+            return self._unquote_string(payload, kwargs,
+                                        always_quoted=always_quoted)
+
+        if not payload:
+            raise PythonDialogBug(
+                "unexpected help output whose first line is 'HELP '")
+
+        fields = self._split_output_fields(
+            payload, kwargs, default_separator,
+            always_quoted=always_quoted, strip_trailing=strip_trailing)
+
+        if not fields:
+            raise PythonDialogBug(
+                "unexpected help output whose first line is 'HELP '")
 
         if multival:
-            if multival_on_single_line:
-                args = self._split_shellstyle_arglist(s)
-                if not args:
-                    raise PythonDialogBug(
-                        "expected a non-empty space-separated list of "
-                        "possibly-quoted strings in this help output: {0!r}"
-                        .format(output))
-                return (args[0], args[1:])
-            else:
-                return (s, l[1:])
-        else:
-            if not s:
-                raise PythonDialogBug(
-                    "unexpected help output whose first line is 'HELP '")
-            elif s[0] != '"':
-                l2 = s.split(' ', 1)
-                if len(l2) == 1:
-                    raise PythonDialogBug(
-                        "expected 'HELP <id> <status>' in the help output, "
-                        "but couldn't find any space after 'HELP '")
-                else:
-                    return tuple(l2)
-            else:
-                help_id, after_index = self._parse_quoted_string(s)
-                if not s[after_index:].startswith(" "):
-                    raise PythonDialogBug(
-                        "expected 'HELP <quoted_id> <status>' in the help "
-                        "output, but couldn't find any space after "
-                        "'HELP <quoted_id>'")
-                return (help_id, s[after_index+1:])
+            return (fields[0], fields[1:])
+
+        if len(fields) < 2:
+            raise PythonDialogBug(
+                "expected 'HELP <id> <status>' in the help output: "
+                "{0!r}".format(output))
+
+        separator = self._output_separator(kwargs, default_separator)
+        return (fields[0], separator.join(fields[1:]))
 
     def _widget_with_string_output(self, args, kwargs,
                                    strip_xdialog_newline=False,
-                                   raw_help=False):
+                                   raw_help=False, unquote=False):
         """Generic implementation for a widget that produces a single string.
 
         The help output must be present regardless of whether
         --help-status was passed or not.
+
+        When *unquote* is true, dialog's shell-style quoting is removed
+        from the result (unless the Help button was pressed).
 
         """
         code, output = self._perform(args, **kwargs)
@@ -1778,6 +1990,8 @@ by :program:`dialog`.
             help_data = self._parse_help(output, kwargs, raw_format=raw_help)
             return (code, help_data)
         else:
+            if unquote:
+                output = self._unquote_string(output, kwargs)
             return (code, output)
 
     def _widget_with_no_output(self, widget_name, args, kwargs):
@@ -1988,9 +2202,16 @@ by :program:`dialog`.
 
         code, output = self._perform(cmd, **kwargs)
 
+        separate_output = bool(kwargs.get("separate_output"))
+        default_separator = "\n" if separate_output else " "
+        always_quoted = not separate_output
+
         if code == self.HELP:
-            help_data = self._parse_help(output, kwargs, multival=True,
-                                         multival_on_single_line=True)
+            help_data = self._parse_help(
+                output, kwargs, multival=True,
+                multival_on_single_line=True,
+                default_separator=default_separator,
+                always_quoted=always_quoted)
             if self._help_status_on(kwargs):
                 help_id, selected_tags = help_data
                 items = [ [ tag, item, tag in selected_tags ] + rest
@@ -1999,7 +2220,13 @@ by :program:`dialog`.
             else:
                 return (code, help_data)
         elif code in (self.OK, self.EXTRA):
-            return (code, self._split_shellstyle_arglist(output))
+            return (code, self._split_output_fields(
+                output, kwargs, default_separator,
+                always_quoted=always_quoted,
+                # With --output-separator, buildlist emits a separator
+                # *before* the first selected tag as well.
+                strip_leading=("output_separator" in kwargs
+                               or "separator" in kwargs)))
         else:
             return (code, None)
 
@@ -2135,7 +2362,9 @@ by :program:`dialog`.
         # in the output. There is also a final newline after the last tag.
 
         if code == self.HELP:
-            help_data = self._parse_help(output, kwargs, multival=True)
+            help_data = self._parse_help(
+                output, kwargs, multival=True, default_separator="\n",
+                strip_trailing=True)
             if self._help_status_on(kwargs):
                 help_id, selected_tags = help_data
                 choices = [ [ tag, item, tag in selected_tags ] + rest
@@ -2144,7 +2373,8 @@ by :program:`dialog`.
             else:
                 return (code, help_data)
         else:
-            return (code, output.split('\n')[:-1])
+            return (code, self._split_output_fields(
+                output, kwargs, "\n", strip_trailing=True))
 
     def _form_updated_items(self, status, elements):
         """Return a complete list with up-to-date items from 'status'.
@@ -2219,7 +2449,9 @@ by :program:`dialog`.
         (code, output) = self._perform(cmd, **kwargs)
 
         if code == self.HELP:
-            help_data = self._parse_help(output, kwargs, multival=True)
+            help_data = self._parse_help(
+                output, kwargs, multival=True, default_separator="\n",
+                strip_trailing=True)
             if self._help_status_on(kwargs):
                 help_id, status = help_data
                 # 'status' does not contain the fields marked as read-only in
@@ -2234,7 +2466,8 @@ by :program:`dialog`.
             else:
                 return (code, help_data)
         else:
-            return (code, output.split('\n')[:-1])
+            return (code, self._split_output_fields(
+                output, kwargs, "\n", strip_trailing=True))
 
     @widget
     def form(self, text, elements, height=0, width=0, form_height=0, **kwargs):
@@ -2417,7 +2650,7 @@ by :program:`dialog`.
         # (dialog 1.2-20130902).
         return self._widget_with_string_output(
             ["--dselect", filepath, str(height), str(width)],
-            kwargs, raw_help=True)
+            kwargs, raw_help=True, unquote=True)
 
     @widget
     def editbox(self, filepath, height=0, width=0, **kwargs):
@@ -2452,9 +2685,18 @@ by :program:`dialog`.
         """
         # When the Help button is used, dialog writes the edited contents
         # (not a "HELP ..." record) to its output.
-        return self._widget_with_string_output(
+        result = self._widget_with_string_output(
             ["--editbox", filepath, str(height), str(width)],
             kwargs, raw_help=True)
+
+        # --output-separator replaces the newlines between the edited
+        # lines; convert them back so that the returned value is the text.
+        separator = kwargs.get("output_separator")
+        if result[0] != self.HELP and separator is not None \
+                and separator != "\n":
+            result = (result[0], result[1].replace(separator, "\n"))
+
+        return result
 
     def editbox_str(self, init_contents, *args, **kwargs):
         """
@@ -2571,7 +2813,7 @@ by :program:`dialog`.
         # (dialog 1.2-20130902).
         return self._widget_with_string_output(
             ["--fselect", filepath, str(height), str(width)],
-            kwargs, strip_xdialog_newline=True, raw_help=True)
+            kwargs, strip_xdialog_newline=True, raw_help=True, unquote=True)
 
     def gauge_start(self, text="", height=None, width=None, percent=0,
                     **kwargs):
@@ -2807,7 +3049,7 @@ by :program:`dialog`.
         # (dialog 1.2-20130902).
         return self._widget_with_string_output(
             ["--inputbox", text, str(height), str(width), init],
-            kwargs, strip_xdialog_newline=True, raw_help=True)
+            kwargs, strip_xdialog_newline=True, raw_help=True, unquote=True)
 
     @widget
     def inputmenu(self, text, height=0, width=None, menu_height=None,
@@ -2922,18 +3164,19 @@ by :program:`dialog`.
             help_id = self._parse_help(output, kwargs)
             return (code, help_id, None)
         elif code == self.OK:
-            return ("accepted", output, None)
+            return ("accepted", self._unquote_string(output, kwargs), None)
         elif code == self.EXTRA:
             if not output.startswith("RENAMED "):
                 raise PythonDialogBug(
                     "'output' does not start with 'RENAMED ': {0!r}".format(
                         output))
-            t = output.split(' ', 2)
-            if len(t) != 3:
+            fields = self._split_output_fields(output[len("RENAMED "):],
+                                               kwargs, " ")
+            if len(fields) < 2:
                 raise UnexpectedDialogOutput(
                     "unexpected output after renaming an inputmenu entry "
                     "(expected 'RENAMED <tag> <item>'): {0!r}".format(output))
-            return ("renamed", t[1], t[2])
+            return ("renamed", fields[0], " ".join(fields[1:]))
         else:
             return (code, None, None)
 
@@ -2995,7 +3238,7 @@ by :program:`dialog`.
             cmd.extend(t)
 
         return self._widget_with_string_output(
-            cmd, kwargs, strip_xdialog_newline=True)
+            cmd, kwargs, strip_xdialog_newline=True, unquote=True)
 
     @widget
     @retval_is_code
@@ -3200,7 +3443,7 @@ by :program:`dialog`.
         # (dialog 1.2-20130902).
         return self._widget_with_string_output(
             ["--passwordbox", text, str(height), str(width), init],
-            kwargs, strip_xdialog_newline=True, raw_help=True)
+            kwargs, strip_xdialog_newline=True, raw_help=True, unquote=True)
 
     def _progressboxoid(self, widget, file_path=None, file_flags=os.O_RDONLY,
                         fd=None, text=None, height=20, width=78, **kwargs):
@@ -3458,8 +3701,12 @@ by :program:`dialog`.
 
         output = self._strip_xdialog_newline(output)
 
+        separate_output = bool(kwargs.get("separate_output"))
+        default_separator = "\n" if separate_output else " "
+
         if code == self.HELP:
-            help_data = self._parse_help(output, kwargs)
+            help_data = self._parse_help(
+                output, kwargs, default_separator=default_separator)
             if self._help_status_on(kwargs):
                 help_id, selected_tag = help_data
                 # Reconstruct 'choices' with the selected item inferred from
@@ -3470,7 +3717,7 @@ by :program:`dialog`.
             else:
                 return (code, help_data)
         else:
-            return (code, output)
+            return (code, self._unquote_string(output, kwargs))
 
     @widget
     def rangebox(self, text, height=0, width=0, min=None, max=None, init=None,
@@ -3905,8 +4152,14 @@ by :program:`dialog`.
 
         (code, output) = self._perform(cmd, **kwargs)
 
+        separate_output = bool(kwargs.get("separate_output"))
+        default_separator = "\n" if separate_output else " "
+        always_quoted = not separate_output
+
         if code == self.HELP:
-            help_data = self._parse_help(output, kwargs)
+            help_data = self._parse_help(
+                output, kwargs, default_separator=default_separator,
+                always_quoted=always_quoted)
             if self._help_status_on(kwargs):
                 help_id, selected_tag = help_data
                 # Reconstruct 'nodes' with the selected item inferred from
@@ -3917,7 +4170,8 @@ by :program:`dialog`.
             else:
                 return (code, help_data)
         elif code in (self.OK, self.EXTRA):
-            return (code, output)
+            return (code, self._unquote_string(
+                output, kwargs, always_quoted=always_quoted))
         else:
             return (code, None)
 

@@ -1,0 +1,49 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install build and test tools
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install setuptools wheel ruff sphinx
+
+      - name: Compile all Python sources
+        run: |
+          python -m py_compile dialog.py \
+            tests/fake_dialog.py tests/test_dialog.py
+
+      - name: Run unit and integration tests
+        run: python -m unittest discover -s tests -v
+
+      - name: Lint (pyflakes-level checks)
+        run: ruff check --select F,E9 dialog.py tests
+
+      - name: Build documentation
+        if: matrix.python-version == '3.14'
+        run: sphinx-build -b html -W --keep-going doc doc/_build/html
+
+      - name: Build source distribution
+        run: python -c "import setuptools.build_meta as b; b.build_sdist('dist')"

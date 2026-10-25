@@ -14,6 +14,10 @@ possible interface to dialog_ from Python code.
 
 .. _dialog: https://invisible-island.net/dialog/dialog.html
 
+.. image:: https://github.com/grivital/pythondialog/actions/workflows/tests.yml/badge.svg
+   :target: https://github.com/grivital/pythondialog/actions/workflows/tests.yml
+   :alt: Test suite status
+
 pythondialog is free software, licensed under the GNU LGPL (GNU Lesser
 General Public License). This is the maintained fork, hosted at:
 
@@ -62,7 +66,7 @@ Python library`_ looks rather interesting, too.
 Requirements
 ------------
 
-* pythondialog 3.6.0 requires Python 3.10 or later in the 3.x series.
+* pythondialog 3.7.0 requires Python 3.10 or later in the 3.x series.
   It has been tested with Python 3.14.
 
 * dialog_ version 1.3-20201126-1 (the version shipped in Debian stable

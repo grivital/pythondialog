@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE pkgmetadata SYSTEM "https://www.gentoo.org/dtd/metadata.dtd">
+<pkgmetadata>
+	<maintainer type="person">
+		<email>grivital@yandex.ru</email>
+		<name>Vitaly Grinin</name>
+	</maintainer>
+	<longdescription lang="en">
+		pythondialog is a Python wrapper for the UNIX dialog utility. It
+		provides a pythonic interface to dialog and mostly-compatible
+		programs, allowing one to build simple terminal-based user
+		interfaces.
+	</longdescription>
+	<upstream>
+		<remote-id type="github">grivital/pythondialog</remote-id>
+	</upstream>
+</pkgmetadata>

@@ -15,7 +15,11 @@ possible interface to dialog_ from Python code.
 .. _dialog: https://invisible-island.net/dialog/dialog.html
 
 pythondialog is free software, licensed under the GNU LGPL (GNU Lesser
-General Public License). Its home page is located at:
+General Public License). This is the maintained fork, hosted at:
+
+  https://github.com/grivital/pythondialog
+
+The original project's home page is located at:
 
   https://pythondialog.sourceforge.io/
 
@@ -28,9 +32,9 @@ changes`_, links to the `documentation`_, the `Git repository`_, the
 .. _summary of the recent changes:
                     https://pythondialog.sourceforge.io/news.html
 .. _documentation:  https://pythondialog.sourceforge.io/doc/
-.. _Git repository: https://sourceforge.net/p/pythondialog/code/
+.. _Git repository: https://github.com/grivital/pythondialog
 .. _mailing list:   https://sourceforge.net/p/pythondialog/mailman/
-.. _issue tracker:  https://sourceforge.net/p/pythondialog/_list/tickets
+.. _issue tracker:  https://github.com/grivital/pythondialog/issues
 
 If you want to get a quick idea of what this module allows one to do,
 you can download a release tarball and run ``demo.py``::
@@ -58,13 +62,14 @@ Python library`_ looks rather interesting, too.
 Requirements
 ------------
 
-* As of version 2.12, pythondialog requires Python 3.0 or later in the 3.x
-  series. pythondialog 3.5.3 has been tested with Python 3.9.
+* pythondialog 3.6.0 requires Python 3.10 or later in the 3.x series.
+  It has been tested with Python 3.14.
 
 * dialog_ version 1.3-20201126-1 (the version shipped in Debian stable
   and unstable in November 2021) is `broken
   <https://bugs.debian.org/990043>`_; don't waste your time with that
-  version. dialog_ 1.3-20210621 works fine.
+  version. dialog_ 1.3-20210621 and later work fine; 1.3-20250817 is
+  used for the current test suite.
 
 * Versions of pythondialog up to and including 3.5.1 had a backport to
   Python 2, however this outdated Python dialect isn't supported
@@ -85,17 +90,33 @@ Requirements
 Quick installation instructions
 -------------------------------
 
-If you have a working `pip <https://pypi.org/project/pip/>`_ setup,
-you should be able to install pythondialog with::
+From a clone of this repository, install with::
 
-  pip install pythondialog
+  pip install .
 
 When doing so, make sure that your ``pip`` executable runs with the
-Python 3 installation you want to install pythondialog for.
+Python 3 installation you want to install pythondialog for. An editable
+install is also supported::
 
-For more detailed instructions, you can read the ``INSTALL`` file from a
-release tarball. You may also want to consult the `pip documentation
-<https://pip.pypa.io/>`_.
+  pip install -e .
+
+Gentoo users can use the local overlay in the ``gentoo`` directory; see
+``gentoo/README.md`` for instructions.
+
+For more detailed instructions, you can read the ``INSTALL`` file. You
+may also want to consult the `pip documentation <https://pip.pypa.io/>`_.
+
+
+Running the test suite
+----------------------
+
+The tests do not require a terminal, X server or a real ``dialog``
+binary; they use a small stand-in backend::
+
+  python3 -m unittest discover -s tests -v
+
+They cover version parsing, argument construction, output parsing,
+fork/exec error handling and a few end-to-end widget calls.
 
 
 Documentation
@@ -275,7 +296,9 @@ guess). Florent Rougon rewrote most parts of the program to make it more
 robust and flexible so that it can give access to most features of the
 dialog program. Peter Åstrand took over maintainership between 2004 and
 2009, with particular care for the `Xdialog`_ support. Florent Rougon
-took over maintainership again starting from 2009...
+took over maintainership again starting from 2009. In 2026, Vitaly
+Grinin took over maintenance of this fork after support for the
+original package was discontinued in Gentoo.
 
 .. 
   # Local Variables:

@@ -1,7 +1,11 @@
-include README.rst README.distributors COPYING COPYING.Sphinx INSTALL AUTHORS
+include README.rst COPYING COPYING.Sphinx INSTALL AUTHORS
 include TODO ChangeLog MANIFEST.in
+exclude .gitignore CLAUDE.md
+prune pythondialog.egg-info
 recursive-include examples *.py
 recursive-include doc *.py *.txt *.rst *.png Makefile
+recursive-include tests *.py
 prune doc/screenshots/thumbs
 prune doc/screenshots/snapshots.debian.net
 prune doc/_build
+global-exclude __pycache__ *.py[cod]

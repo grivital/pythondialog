@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pythondialog"
+dynamic = ["version"]
+description = "A Python interface to the UNIX dialog utility and mostly-compatible programs"
+readme = "README.rst"
+requires-python = ">=3.10"
+license = "LGPL-2.1-or-later"
+license-files = ["COPYING"]
+authors = [
+    { name = "Robb Shecter", email = "robb@acm.org" },
+]
+maintainers = [
+    { name = "Vitaly Grinin", email = "grivital@yandex.ru" },
+]
+keywords = ["dialog", "ncurses", "Xdialog", "text-mode interface", "terminal"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Environment :: Console :: Curses",
+    "Intended Audience :: Developers",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: Unix",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Software Development :: User Interfaces",
+    "Topic :: Software Development :: Widget Sets",
+]
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/grivital/pythondialog"
+Repository = "https://github.com/grivital/pythondialog"
+Issues = "https://github.com/grivital/pythondialog/issues"
+Documentation = "https://pythondialog.sourceforge.io/doc/"
+Upstream = "https://pythondialog.sourceforge.io/"
+
+[tool.setuptools]
+py-modules = ["dialog"]
+
+[tool.setuptools.dynamic]
+version = { attr = "dialog.__version__" }

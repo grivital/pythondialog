@@ -1,3 +1,24 @@
+2026-10-25  Vitaly Grinin  <grivital@yandex.ru>
+
+	Release 3.6.0
+
+	* Require Python 3.10+; remove Python 2/3.2 compatibility branches.
+	* Fix Dialog.gauge_iterate() (NameError), unterminated quoted strings
+	  in help output (IndexError), child-process error reporting when
+	  dup(2) fails, and temporary file/descriptor leaks on fork/exec
+	  failures.
+	* Raise BadPythonDialogUsage instead of KeyError for unknown common
+	  options; validate the 'compat' argument; report malformed rangebox
+	  and inputmenu output as UnexpectedDialogOutput.
+	* Add common options: color_mode, cursor_off_label, erase_on_exit,
+	  input_fd, iso_week, no_hot_list, output_fd, reorder.
+	* Add prgbox and tailboxbg widgets.
+	* Modernize packaging: pyproject.toml (PEP 517/621), drop setup.py
+	  and setup.cfg; add a unittest suite with a stand-in dialog backend.
+	* Add a self-contained Gentoo overlay in gentoo/.
+	* Remove pythondialog.egg-info, PKG-INFO, ChangeLog.init and the
+	  obsolete ChangeLog-generation instructions.
+
 2021-11-26  Florent Rougon  <f.rougon@frougon.net>
 
 	Release 3.5.3

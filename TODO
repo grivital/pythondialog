@@ -1,5 +1,14 @@
-* Support for --output-separator
+* Support --and-widget chaining. This requires a different execution
+  model: one dialog process displays several widgets, and the output of
+  each widget is separated with --separate-widget. Pythondialog
+  currently runs one process per widget.
+
+* Support the output-affecting options --output-separator (and its
+  --separator alias), --quoted, --single-quoted, --no-items and
+  --last-key. They are understood by dialog, but exposing them as common
+  options without extending every output parser would silently corrupt
+  widget return values.
+
+* Add convenience methods for --print-text-only and --print-text-size.
 
 * Check for terminal resizing?..
-
-* Support --tailboxbg

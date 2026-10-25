@@ -4,53 +4,62 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Что это за проект
 
-pythondialog — Python-обёртка над UNIX-утилитой `dialog` (ncurses TUI). Вся библиотека
-состоит из одного модуля `dialog.py` (~3770 строк), без сторонних зависимостей и без
-пакета: `setup.py` объявляет `py_modules=["dialog"]`. Требуется Python 3 и установленный
-исполняемый файл `dialog` (или совместимый `Xdialog`). Версия библиотеки задаётся
-переменной `version_info` в начале `dialog.py` (сейчас 3.5.3).
-
-Тестового фреймворка нет: `examples/demo.py` выполняет роль «дешёвого тест-сьюта»
-(см. его `--test-suite`/`--fast`).
+pythondialog — Python-обёртка над UNIX-утилитой `dialog` (ncurses TUI).
+Основной код — один модуль `dialog.py` (~3800 строк) без сторонних зависимостей.
+Это поддерживаемый форк: https://github.com/grivital/pythondialog (версия 3.6.0,
+Python >= 3.10). Упаковка — PEP 517/621 (`pyproject.toml`, setuptools).
 
 ## Команды
 
 ```bash
-# Простой пример (нужен TTY и бинарник dialog в PATH)
-PYTHONPATH=. python3 examples/simple_example.py
+# Тесты (не нужен TTY; используется tests/fake_dialog.py)
+python3 -m unittest discover -s tests -v
+make test
 
-# Демо / ручная проверка виджетов
-PYTHONPATH=. python3 examples/demo.py
-PYTHONPATH=. python3 examples/demo.py --help        # список опций
-PYTHONPATH=. python3 examples/demo.py -t            # testsuite-режим (подразумевает -f)
-PYTHONPATH=. python3 examples/demo.py -f            # fast-режим
-PYTHONPATH=. python3 examples/demo.py --debug --debug-file=/tmp/debug.log
+# Линт/проверка синтаксиса
+make check
+ruff check --select F,E9 dialog.py tests
+python3 -m py_compile dialog.py
 
-# Вариант с autowidgetsize
-PYTHONPATH=. python3 examples/with-autowidgetsize/simple_example.py
+# Сборка sdist (без python-build)
+make sdist
+# или: python3 -c "import setuptools.build_meta as b; print(b.build_sdist('dist'))"
 
-# Проверка синтаксиса/импорта без запуска виджетов
-python3 -c 'import dialog; print(dialog.__version__)'
+# Документация (нужен Sphinx; вывод в doc/_build/html)
+make docs
+cd doc && make html
 
 # Установка
 pip install .
 pip install -e .
-python3 setup.py sdist            # ChangeLog + sdist
 
-# Документация (нужен Sphinx; вывод в doc/_build/html)
-cd doc && make html
-# либо: sphinx-build -b html . _build/html
+# Ручная проверка виджетов (нужен TTY и бинарник dialog)
+PYTHONPATH=. python3 examples/simple_example.py
+PYTHONPATH=. python3 examples/demo.py
+PYTHONPATH=. python3 examples/demo.py -t      # testsuite-режим
+PYTHONPATH=. python3 examples/demo.py --debug --debug-file=/tmp/debug.log
 ```
 
-Отладочные предупреждения об устаревших API: `PYTHONPATH=. python3 -Wd examples/demo.py 2>/tmp/warn.log`
-(stderr нужно перенаправлять, иначе вывод dialog его затирает).
+Тестового фреймворка нет специально: стандартный `unittest`, имитатор
+`tests/fake_dialog.py` понимает `--file`, `--print-version`, основные виджеты,
+`--help`, `--gauge` и позволяет проверять fork/exec, pipe и парсинг без TTY.
 
-### Особенности setup.py
+### Gentoo
 
-При наличии `.git` `setup.py` каждый раз перегенерирует `ChangeLog` из git-лога через
-`gitlog-to-changelog` (должен быть в `PATH`) и `ChangeLog.init`. Без `.git` используется
-существующий `ChangeLog`; если нет ни `.git`, ни `ChangeLog` — сборка прерывается.
-`ChangeLog` не редактируется вручную; `ChangeLog.init` — рукописный префикс.
+Самодостаточный overlay лежит в `gentoo/`:
+
+```bash
+make sdist
+cd gentoo/dev-python/pythondialog
+DISTDIR="$OLDPWD/dist" ebuild pythondialog-3.6.0.ebuild manifest
+sudo emaint sync -r pythondialog-overlay   # после настройки repos.conf
+sudo emerge -av dev-python/pythondialog
+```
+
+Ebuild: EAPI 8, `distutils-r1`, `DISTUTILS_USE_PEP517=setuptools`,
+`PYTHON_COMPAT=( python3_{11..14} pypy3 )`, `RDEPEND="dev-util/dialog"`.
+Исходники скачиваются из GitHub Release `v3.6.0`; после изменения кода
+нужно пересобрать sdist, выпустить релиз и обновить `Manifest`.
 
 ## Архитектура `dialog.py`
 
@@ -58,30 +67,28 @@ cd doc && make html
 
 1. **Версии и исключения** — `VersionInfo`, `version_info`, иерархия `error`
    (`ExecutableNotFound`, `PythonDialogBug`, `BadPythonDialogUsage`,
-   `PythonDialogSystemError` → `PythonDialogOSError`/`PythonDialogIOError`,
-   `UnexpectedDialogOutput`, `DialogTerminatedBySignal`, `DialogError`,
-   `UnableToRetrieveBackendVersion`/`UnableToParseBackendVersion`/
-   `InadequateBackendVersion` и др.). Иерархия документирована в docstring модуля —
-   при изменении обновлять его.
+   `PythonDialogSystemError` → `PythonDialogOSError`, `UnexpectedDialogOutput`,
+   `DialogTerminatedBySignal`, `DialogError`, исключения версий бэкенда).
+   `PythonDialogIOError` сохранён для обратной совместимости, но больше не
+   выбрасывается (в Python 3 `IOError` — алиас `OSError`).
 2. **Построение аргументов** — `_common_args_syntax` (dict: pythonic-имя →
-   лямбда, формирующая флаги `dialog`), `_compute_common_args()`, `_dash_escape*`.
-   Любой `**kwargs` виджета превращается в «общие опции» `dialog(1)`;
-   подчёркивания соответствуют дефисам в именах опций, булевы опции передаются
-   только при истинном значении.
-3. **Версия бэкенда** — `BackendVersion`, `DialogBackendVersion` (сравнение по
-   «dotted part» + «rest», например `1.2-20130902`). В `Dialog.__init__`
-   вызывается `backend_version()` (`dialog --print-version`) и результат
-   кэшируется в `cached_backend_version`; `_dialog_version_check()` бросает
-   `InadequateBackendVersion` для виджетов, требующих свежий `dialog`
-   (`buildlist`, `rangebox`, `treeview`, `programbox`).
-4. **Декораторы** — `@widget` помечает методы, создающие виджеты (`func.is_widget`);
-   `@retval_is_code` — что метод возвращает только высокоуровневый код
+   лямбда, формирующая флаги `dialog`), `_compute_common_args()`,
+   `_dash_escape*`. Неизвестная опция даёт `BadPythonDialogUsage`.
+   Подчёркивания соответствуют дефисам, булевы опции передаются только при
+   истинном значении. Часть опций, влияющих на формат вывода
+   (`--output-separator`, `--quoted`, `--single-quoted`, `--no-items`,
+   `--last-key`, `--and-widget`), намеренно не добавлена — см. `TODO`.
+3. **Версия бэкенда** — `BackendVersion` (ABC), `DialogBackendVersion`
+   (сравнение по dotted part + rest). В `Dialog.__init__` вызывается
+   `backend_version()` (`dialog --print-version`), результат кэшируется в
+   `cached_backend_version`; `_dialog_version_check()` бросает
+   `InadequateBackendVersion` для `buildlist`, `rangebox`, `treeview`,
+   `prgbox`, `programbox`.
+4. **Декораторы** — `@widget` (`func.is_widget`) и `@retval_is_code`
    (`func.retval_is_code`). Эти атрибуты публично значимы: `examples/demo.py`
-   (`MyDialog.__getattr__`) и сторонний код строят на них обёртки. Не удалять и
-   не менять семантику без необходимости.
-5. **Класс `Dialog`** — ядро API. Каждый виджет (`msgbox`, `yesno`, `checklist`,
-   `menu`, `form`, `gauge_*`, `treeview`, …) — метод класса, который собирает
-   список `cmd` и вызывает `_perform()`.
+   (`MyDialog.__getattr__`) и сторонний код строят на них обёртки.
+5. **Класс `Dialog`** — каждый виджет собирает список `cmd` и вызывает
+   `_perform()`.
 
 ### Цепочка вызова
 
@@ -89,75 +96,75 @@ cd doc && make html
 widget-метод
   → _default_size()          # autowidgetsize: None → 0 или старое значение
   → _perform(cmd, **kwargs)
-      → _call_program()      # fork/exec, pipe для stderr (или stdout у Xdialog),
-                             # DIALOG_* переменные окружения, опционально --file
+      → _call_program()      # fork/exec, pipe для stderr (stdout у Xdialog),
+                             # DIALOG_* в окружении, опционально --file
       → _handle_program_exit()
-      → _wait_for_program_termination()   # читает вывод, ждёт exit status
-  → разбор вывода (_parse_help(), _split_shellstyle_arglist(), _to_onoff())
+      → _wait_for_program_termination()
+  → разбор вывода (_parse_help, _split_shellstyle_arglist, _to_onoff)
 ```
 
-Важные детали `_call_program()`:
-- общение с `dialog` идёт через pipe на **stderr** (у `compat="Xdialog"` —
-  на stdout); `use_stdout` переключает это;
-- в окружение дочернего процесса кладутся `DIALOG_OK`, `DIALOG_CANCEL`, …,
-  чтобы контролировать коды завершения;
+`_call_program()`:
+- общение с `dialog` идёт через pipe на **stderr** (`compat="Xdialog"` —
+  stdout); `use_stdout` переключает это;
+- в окружение дочернего процесса кладутся `DIALOG_OK`, `DIALOG_CANCEL`, …;
 - `pass_args_via_file` (по умолчанию включён для `dialog >= 1.2-20150513`)
-  пишет аргументы во временный файл и передаёт `--file`, скрывая их из
-  списка процессов;
-- `dash_escape` защищает пользовательские строки, начинающиеся с `--`.
+  пишет аргументы во временный файл и передаёт `--file`;
+- `dash_escape` защищает строки, начинающиеся с `--`;
+- ошибки до `fork()`/`exec()` очищают pipe и временный файл; в дочернем
+  процессе `father_stderr` инициализируется до `dup(2)`, чтобы не потерять
+  traceback.
 
 ### Два уровня кодов возврата
 
-- Низкоуровневые целочисленные статусы `dialog`: `_DIALOG_OK` и т. п.,
+- Низкоуровневые целочисленные статусы `dialog`: `_DIALOG_OK` и т.п.,
   `_lowlevel_exit_codes`, `_dialog_exit_code_ll_to_hl`.
 - Высокоуровневые строковые «Dialog exit codes»: `Dialog.OK`, `CANCEL`, `ESC`,
-  `HELP`, `EXTRA`, `TIMEOUT`; публичный API должен использовать их.
-  `DIALOG_*`-свойства оставлены для обратной совместимости и выдают
-  `DeprecationWarning`.
+  `HELP`, `EXTRA`, `TIMEOUT`. Публичный API должен использовать их.
+  `DIALOG_*`-свойства оставлены с `DeprecationWarning`.
 
 Виджеты возвращают либо сам код, либо кортеж, первым элементом которого он
 является. `--help`-вывод разбирается `_parse_help()` (учитывает
-`--help-status`, `--item-help`, `--help-tags`).
+`--help-status`, `--item-help`, `--help-tags`); пустой вывод при включённом
+`--help-status` — это `PythonDialogBug`.
 
 ### Потоковые виджеты
 
 `gauge_start()`/`gauge_update()`/`gauge_stop()` и `progressbox`/`programbox`
 передают данные в stdin дочернего процесса через `redir_child_stdin_from_fd`;
-`gauge_iterate()` — генератор-обёртка. Не буферизуйте вывод: статус `dialog`
-читается построчно через pipe.
+`gauge_iterate()` — устаревшая обёртка над `gauge_update()`. Не буферизуйте
+вывод: статус `dialog` читается через pipe.
 
 ### Размеры виджетов
 
-`autowidgetsize=True` в конструкторе означает «вести себя как при
-`height=0, width=0`»: параметры со значением по умолчанию `None` подменяются
-на `0` в `_default_size()`. Явный `None` в размерах передавать нельзя.
+`autowidgetsize=True` означает «вести себя как при `height=0, width=0`»:
+параметры со значением по умолчанию `None` подменяются на `0` в
+`_default_size()`. Явный `None` в размерах передавать нельзя.
 
 ## Документация
 
 `doc/*.rst` + autodoc: Sphinx импортирует `dialog` (в `conf.py` добавлен `..`
-в `sys.path`) и тянет docstrings прямо из `dialog.py`. Поэтому docstring'и —
-основной источник правды; изменения API должны сопровождаться правкой
-docstring'ов и, при необходимости, `doc/widgets.rst` /
-`doc/Dialog_class_overview.rst`. В docstring'ах используются reST-директивы
-`.. versionadded::`/`.. versionchanged::` — продолжайте эту практику.
-`doc/index.rst` ссылается на `doc/intro/intro.rst`; скриншоты лежат в
-`doc/screenshots/`.
+в `sys.path`) и тянет docstrings из `dialog.py`. Docstring'и — основной
+источник правды; изменения API должны сопровождаться правкой docstring'ов и,
+при необходимости, `doc/widgets.rst` / `doc/Dialog_class_overview.rst`.
+Используются reST-директивы `.. versionadded::`/`.. versionchanged::`.
+`doc/index.rst` ссылается на `doc/intro/intro.rst`; скриншоты — в
+`doc/screenshots/`. `intersphinx_mapping` пуст, чтобы сборка не ходила в сеть.
 
 ## Соглашения и подводные камни
 
-- Поддержка Python 3; никаких сторонних зависимостей в `dialog.py` —
-  только стандартная библиотека.
-- Обратная совместимость важна: устаревшее не удаляется, а помечается
-  `DeprecationWarning` (например, `_obsolete_property`, старые имена опций
-  вроде `cancel` → `cancel_label`).
-- Форматирование исходников: кодировка UTF-8, ширина ~72–79 колонок,
-  docstring'и в reST. В конце файлов — Emacs local variables, их не трогать.
-- Все пользовательские строки, уходящие в `dialog`, должны проходить через
-  dash-escaping; при добавлении нового виджета не забывайте про
-  `--separate-output`, если вывод содержит теги/пробелы.
-- `dialog` версии 1.3-20201126 (Debian) сломан; для проверок используйте
-  другую сборку.
-- В docstring'е `treeview` есть неэкранированный `\s` — на Python 3.12+
-  `py_compile` выдаёт `SyntaxWarning` (не ошибка).
-- Запуск примеров и любых виджетов требует настоящего TTY; в неинтерактивной
-  среде проверяйте только импорт/синтаксис (`python3 -m py_compile dialog.py`).
+- Только стандартная библиотека в `dialog.py`; сторонние зависимости не
+  добавлять. Минимум — Python 3.10.
+- Обратная совместимость: устаревшее не удаляется, а помечается
+  `DeprecationWarning` (`_obsolete_property`, `setBackgroundTitle`, `clear`,
+  `gauge_iterate`, `_perform_no_options`).
+- Форматирование: UTF-8, ~72–79 колонок, reST-docstring'и. Emacs local
+  variables в конце файлов не трогать.
+- Пользовательские строки, уходящие в `dialog`, проходят dash-escaping.
+- `ChangeLog` больше не генерируется из git автоматически; новые записи
+  добавляются вручную в том же формате.
+- Запуск примеров и виджетов требует настоящего TTY; в неинтерактивной среде
+  используйте `tests/fake_dialog.py` и `python3 -m py_compile`.
+- `dialog` 1.3-20201126 (Debian) сломан; для проверок используйте другую сборку
+  (в текущем окружении — 1.3-20250817).
+- Репозиторий: https://github.com/grivital/pythondialog. Коммиты и push —
+  только по запросу пользователя.

@@ -33,15 +33,15 @@ See the pythondialog manual for detailed documentation.
 
 """
 
+import abc
 import collections
 import os
-import random
 import re
-import sys
 import tempfile
 import traceback
 import warnings
 from contextlib import contextmanager
+from shlex import quote as _shell_quote
 from textwrap import dedent
 
 _VersionInfo = collections.namedtuple(
@@ -69,7 +69,7 @@ class VersionInfo(_VersionInfo):
 #: Version of pythondialog as a :class:`VersionInfo` instance.
 #:
 #: .. versionadded:: 2.14
-version_info = VersionInfo(3, 5, 3, None)
+version_info = VersionInfo(3, 6, 0, None)
 #: Version of pythondialog as a string.
 #:
 #: .. versionadded:: 2.12
@@ -78,11 +78,6 @@ __version__ = str(version_info)
 
 # This is not for calling programs, only to prepare the shell commands that are
 # written to the debug log when debugging is enabled.
-try:
-    from shlex import quote as _shell_quote
-except ImportError:
-    def _shell_quote(s):
-        return "'%s'" % s.replace("'", "'\"'\"'")
 
 
 # Exceptions raised by this module
@@ -161,20 +156,19 @@ that should be passed to the calling program."""
     ExceptionShortDescription = "OS error"
 
 class PythonDialogIOError(PythonDialogOSError):
-    """Exception raised when pythondialog catches an :exc:`IOError` exception \
-that should be passed to the calling program.
+    """Exception kept for backward compatibility.
 
-    This exception should not be raised starting from Python 3.3, as the
-    built-in exception :exc:`IOError` becomes an alias of
-    :exc:`OSError`.
+    Since Python 3.3, :exc:`IOError` is an alias of :exc:`OSError` and
+    pythondialog does not raise this exception anymore; catch
+    :exc:`PythonDialogOSError` instead.
 
     .. versionchanged:: 2.12
        :exc:`PythonDialogIOError` is now a subclass of
        :exc:`PythonDialogOSError` in order to help with the transition
        from :exc:`IOError` to :exc:`OSError` in the Python language.
-       With this change, you can safely replace ``except
-       PythonDialogIOError`` clauses with ``except PythonDialogOSError``
-       even if running under Python < 3.3.
+
+    .. deprecated:: 3.6
+       Catch :exc:`PythonDialogOSError` instead.
 
     """
     ExceptionShortDescription = "IO error"
@@ -259,8 +253,6 @@ def _OSErrorHandling():
         yield
     except OSError as e:
         raise PythonDialogOSError(str(e)) from e
-    except IOError as e:
-        raise PythonDialogIOError(str(e)) from e
 
 
 try:
@@ -351,12 +343,17 @@ _common_args_syntax = {
     "clear": lambda enable: _simple_option("--clear", enable),
     "colors": lambda enable: _simple_option("--colors", enable),
     "column_separator": lambda s: _dash_escape_nf(("--column-separator", s)),
+    # Extends --colors to programbox, tailbox and textbox contents
+    "color_mode": lambda code: _dash_escape_nf(("--color-mode", str(code))),
     "cr_wrap": lambda enable: _simple_option("--cr-wrap", enable),
     "create_rc": lambda filename: _dash_escape_nf(("--create-rc", filename)),
+    "cursor_off_label": lambda enable: _simple_option("--cursor-off-label",
+                                                      enable),
     "date_format": lambda s: _dash_escape_nf(("--date-format", s)),
     "defaultno": lambda enable: _simple_option("--defaultno", enable),
     "default_button": lambda s: _dash_escape_nf(("--default-button", s)),
     "default_item": lambda s: _dash_escape_nf(("--default-item", s)),
+    "erase_on_exit": lambda enable: _simple_option("--erase-on-exit", enable),
     "exit_label": lambda s: _dash_escape_nf(("--exit-label", s)),
     "extra_button": lambda enable: _simple_option("--extra-button", enable),
     "extra_label": lambda s: _dash_escape_nf(("--extra-label", s)),
@@ -368,7 +365,11 @@ _common_args_syntax = {
     "hfile": lambda filename: _dash_escape_nf(("--hfile", filename)),
     "hline": lambda s: _dash_escape_nf(("--hline", s)),
     "ignore": lambda enable: _simple_option("--ignore", enable),
+    # The file descriptor must be inheritable (os.set_inheritable(fd, True))
+    # so that dialog can use it after exec().
+    "input_fd": lambda fd: _dash_escape_nf(("--input-fd", str(fd))),
     "insecure": lambda enable: _simple_option("--insecure", enable),
+    "iso_week": lambda enable: _simple_option("--iso-week", enable),
     "item_help": lambda enable: _simple_option("--item-help", enable),
     "keep_tite": lambda enable: _simple_option("--keep-tite", enable),
     "keep_window": lambda enable: _simple_option("--keep-window", enable),
@@ -376,6 +377,7 @@ _common_args_syntax = {
     "no_cancel": lambda enable: _simple_option("--no-cancel", enable),
     "nocancel": lambda enable: _simple_option("--nocancel", enable),
     "no_collapse": lambda enable: _simple_option("--no-collapse", enable),
+    "no_hot_list": lambda enable: _simple_option("--no-hot-list", enable),
     "no_kill": lambda enable: _simple_option("--no-kill", enable),
     "no_label": lambda s: _dash_escape_nf(("--no-label", s)),
     "no_lines": lambda enable: _simple_option("--no-lines", enable),
@@ -385,6 +387,10 @@ _common_args_syntax = {
     "no_shadow": lambda enable: _simple_option("--no-shadow", enable),
     "no_tags": lambda enable: _simple_option("--no-tags", enable),
     "ok_label": lambda s: _dash_escape_nf(("--ok-label", s)),
+    # Redirects dialog's output to another file descriptor. Unless the caller
+    # reads that fd (or uses the same fd pythondialog captures, normally 2),
+    # widget results will be lost. The fd must be inheritable.
+    "output_fd": lambda fd: _dash_escape_nf(("--output-fd", str(fd))),
     # cf. Dialog.maxsize()
     "print_maxsize": lambda enable: _simple_option("--print-maxsize",
                                                    enable),
@@ -392,6 +398,7 @@ _common_args_syntax = {
     # cf. Dialog.backend_version()
     "print_version": lambda enable: _simple_option("--print-version",
                                                    enable),
+    "reorder": lambda enable: _simple_option("--reorder", enable),
     "scrollbar": lambda enable: _simple_option("--scrollbar", enable),
     "separate_output": lambda enable: _simple_option("--separate-output",
                                                      enable),
@@ -475,7 +482,7 @@ def _path_to_executable(f):
                     "can't find the executable for the dialog-like "
                     "program")
 
-    return os.path.realpath(res)
+        return os.path.realpath(res)
 
 
 def _to_onoff(val):
@@ -530,55 +537,51 @@ def _compute_common_args(mapping):
     """
     args = []
     for option, value in mapping.items():
-        args.extend(_common_args_syntax[option](value))
+        try:
+            option_builder = _common_args_syntax[option]
+        except KeyError:
+            raise BadPythonDialogUsage(
+                "unknown dialog common option: {0!r}".format(option)) from None
+        args.extend(option_builder(value))
     return args
 
 
 # Classes for dealing with the version of dialog-like backend programs
-if sys.hexversion >= 0x030200F0:
-    import abc
-    # Abstract base class
-    class BackendVersion(metaclass=abc.ABCMeta):
-        @abc.abstractmethod
-        def __str__(self):
-            raise NotImplementedError()
+class BackendVersion(metaclass=abc.ABCMeta):
+    """Abstract base class for backend version representations."""
 
-        if sys.hexversion >= 0x030300F0:
-            @classmethod
-            @abc.abstractmethod
-            def fromstring(cls, s):
-                raise NotImplementedError()
-        else:                   # for Python 3.2
-            @abc.abstractclassmethod
-            def fromstring(cls, s):
-                raise NotImplementedError()
+    @abc.abstractmethod
+    def __str__(self):
+        raise NotImplementedError()
 
-        @abc.abstractmethod
-        def __lt__(self, other):
-            raise NotImplementedError()
+    @classmethod
+    @abc.abstractmethod
+    def fromstring(cls, s):
+        raise NotImplementedError()
 
-        @abc.abstractmethod
-        def __le__(self, other):
-            raise NotImplementedError()
+    @abc.abstractmethod
+    def __lt__(self, other):
+        raise NotImplementedError()
 
-        @abc.abstractmethod
-        def __eq__(self, other):
-            raise NotImplementedError()
+    @abc.abstractmethod
+    def __le__(self, other):
+        raise NotImplementedError()
 
-        @abc.abstractmethod
-        def __ne__(self, other):
-            raise NotImplementedError()
+    @abc.abstractmethod
+    def __eq__(self, other):
+        raise NotImplementedError()
 
-        @abc.abstractmethod
-        def __gt__(self, other):
-            raise NotImplementedError()
+    @abc.abstractmethod
+    def __ne__(self, other):
+        raise NotImplementedError()
 
-        @abc.abstractmethod
-        def __ge__(self, other):
-            raise NotImplementedError()
-else:
-    class BackendVersion:
-        pass
+    @abc.abstractmethod
+    def __gt__(self, other):
+        raise NotImplementedError()
+
+    @abc.abstractmethod
+    def __ge__(self, other):
+        raise NotImplementedError()
 
 
 class DialogBackendVersion(BackendVersion):
@@ -651,14 +654,17 @@ class DialogBackendVersion(BackendVersion):
                 tmp = self.__class__.fromstring(dotted_part_or_str)
                 dotted_part_or_str, rest = tmp.dotted_part, tmp.rest
 
-        for elt in dotted_part_or_str:
+        # Convert first: 'dotted_part_or_str' may be a generator, which would
+        # be exhausted by the validation loop below.
+        dotted_part = list(dotted_part_or_str)
+        for elt in dotted_part:
             if not isinstance(elt, int):
                 raise BadPythonDialogUsage(
                     "when 'dotted_part_or_str' is not a string, it must "
                     "be a sequence (or iterable) of integers; however, "
                     "{0!r} is not an integer.".format(elt))
 
-        self.dotted_part = list(dotted_part_or_str)
+        self.dotted_part = dotted_part
         self.rest = rest
 
     def __repr__(self):
@@ -989,6 +995,11 @@ class Dialog:
            Support for the *pass_args_via_file* parameter.
 
         """
+        if compat not in ("dialog", "Xdialog"):
+            raise BadPythonDialogUsage(
+                "invalid 'compat' value: {0!r} (expected 'dialog' or "
+                "'Xdialog')".format(compat))
+
         # DIALOGRC differs from the Dialog._DIALOG_* attributes in that:
         #   1. It is an instance attribute instead of a class attribute.
         #   2. It should be a string if not None.
@@ -1282,8 +1293,7 @@ class Dialog:
         # We want to define DIALOG_OK, DIALOG_CANCEL, etc. in the
         # environment of the child process so that we know (and
         # even control) the possible dialog exit statuses.
-        new_environ = {}
-        new_environ.update(os.environ)
+        new_environ = dict(os.environ)
         for var, value in self._lowlevel_exit_codes.items():
             varname = "DIALOG_" + var
             new_environ[varname] = str(value)
@@ -1306,34 +1316,57 @@ class Dialog:
         arglist.extend(_compute_common_args(kwargs) + cmdargs)
         orig_args = arglist[:] # New object, copy of 'arglist'
 
-        if self.pass_args_via_file:
-            tmpfile = tempfile.NamedTemporaryFile(
-                mode="w", prefix="pythondialog.tmp", delete=False)
-            with tmpfile as f:
-                f.write(' '.join( ( self._quote_arg_for_file_opt(arg)
-                                    for arg in arglist[1:] ) ))
-            args_file = tmpfile.name
-            arglist[1:] = ["--file", args_file]
-        else:
-            args_file = None
+        args_file = None
+        child_output_rfd = child_output_wfd = None
 
-        if self._debug_enabled:
-            # Write the complete command line with environment variables
-            # setting to the debug log file (POSIX shell syntax for easy
-            # copy-pasting into a terminal, followed by repr(arglist)).
-            self._write_command_to_file(
-                new_environ, orig_args if self._expand_file_opt else arglist)
+        try:
+            if self.pass_args_via_file:
+                with _OSErrorHandling():
+                    tmpfile = tempfile.NamedTemporaryFile(
+                        mode="w", prefix="pythondialog.tmp", delete=False)
+                    args_file = tmpfile.name
+                    with tmpfile as f:
+                        f.write(' '.join(
+                            self._quote_arg_for_file_opt(arg)
+                            for arg in arglist[1:]))
+                arglist[1:] = ["--file", args_file]
 
-        # Create a pipe so that the parent process can read dialog's
-        # output on stderr (stdout with 'use_stdout')
-        with _OSErrorHandling():
-            # rfd = File Descriptor for Reading
-            # wfd = File Descriptor for Writing
-            (child_output_rfd, child_output_wfd) = os.pipe()
+            if self._debug_enabled:
+                # Write the complete command line with environment variables
+                # setting to the debug log file (POSIX shell syntax for easy
+                # copy-pasting into a terminal, followed by repr(arglist)).
+                self._write_command_to_file(
+                    new_environ,
+                    orig_args if self._expand_file_opt else arglist)
 
-        child_pid = os.fork()
+            # Create a pipe so that the parent process can read dialog's
+            # output on stderr (stdout with 'use_stdout')
+            with _OSErrorHandling():
+                # rfd = File Descriptor for Reading
+                # wfd = File Descriptor for Writing
+                (child_output_rfd, child_output_wfd) = os.pipe()
+
+            with _OSErrorHandling():
+                child_pid = os.fork()
+        except BaseException:
+            # Clean up everything that may have been allocated before the
+            # failure. Cleanup errors must not mask the original exception.
+            for fd in (child_output_rfd, child_output_wfd):
+                if fd is not None:
+                    try:
+                        os.close(fd)
+                    except OSError:
+                        pass
+            if args_file is not None:
+                try:
+                    os.unlink(args_file)
+                except OSError:
+                    pass
+            raise
+
         if child_pid == 0:
             # We are in the child process. We MUST NOT raise any exception.
+            father_stderr = None
             try:
                 # 1) If the write end of a pipe isn't closed, the read end
                 #    will never see EOF, which can indefinitely block the
@@ -1356,10 +1389,16 @@ class Dialog:
                     os.dup2(redir_child_stdin_from_fd, 0)
 
                 os.execve(self._dialog_prg, arglist, new_environ)
-            except:
-                print(traceback.format_exc(), file=father_stderr)
-                father_stderr.close()
-                os._exit(127)
+            except BaseException:
+                # Error reporting must never let an exception escape in the
+                # child process: that would make it execute the parent's code
+                # after _call_program().
+                try:
+                    if father_stderr is not None:
+                        traceback.print_exc(file=father_stderr)
+                        father_stderr.close()
+                finally:
+                    os._exit(127)
 
             # Should not happen unless there is a bug in Python
             os._exit(126)
@@ -1585,8 +1624,8 @@ class Dialog:
             l.append(s[i])
             i += 1
 
-        if s[i] != '"':
-            raise PythonDialogBug("quoted string does not and with a double "
+        if i >= len(s) or s[i] != '"':
+            raise PythonDialogBug("quoted string does not end with a double "
                                   "quote: {0!r}".format(s))
 
         return (''.join(l), i+1)
@@ -1667,6 +1706,10 @@ by :program:`dialog`.
         # Simple widgets such as 'yesno' will fall in this case if they use
         # this method.
         if not l:
+            if self._help_status_on(kwargs):
+                raise PythonDialogBug(
+                    "expected help output because --help-status was "
+                    "requested, but the dialog-like program returned none")
             return None
 
         # The widgets that actually use --help-status always have the first
@@ -1805,10 +1848,12 @@ by :program:`dialog`.
             # apparently does that). Try again, reading from stdout this
             # time.
             self.use_stdout = True
-            code, output = self._perform(["--stdout", "--print-version"],
-                                         use_persistent_args=False,
-                                         dash_escape="none")
-            self.use_stdout = False
+            try:
+                code, output = self._perform(["--stdout", "--print-version"],
+                                             use_persistent_args=False,
+                                             dash_escape="none")
+            finally:
+                self.use_stdout = False
 
         if code == self.OK:
             try:
@@ -2143,6 +2188,7 @@ by :program:`dialog`.
                         elt_len, i, len(elt)))
 
             # Give names to make the code more readable
+            attributes = None
             if widget_name in ("form", "passwordform"):
                 label, yl, xl, item, yi, xi, field_length, input_length = \
                     elt[:8]
@@ -2404,9 +2450,11 @@ by :program:`dialog`.
         .. seealso:: method :meth:`editbox_str`
 
         """
+        # When the Help button is used, dialog writes the edited contents
+        # (not a "HELP ..." record) to its output.
         return self._widget_with_string_output(
             ["--editbox", filepath, str(height), str(width)],
-            kwargs)
+            kwargs, raw_help=True)
 
     def editbox_str(self, init_contents, *args, **kwargs):
         """
@@ -2576,10 +2624,20 @@ by :program:`dialog`.
             # wfd = File Descriptor for Writing
             (child_stdin_rfd, child_stdin_wfd)  = os.pipe()
 
-            child_pid, child_output_rfd, args_file = self._call_program(
-                ["--gauge", text, str(height), str(width), str(percent)],
-                redir_child_stdin_from_fd=child_stdin_rfd,
-                close_fds=(child_stdin_wfd,), **kwargs)
+            try:
+                child_pid, child_output_rfd, args_file = self._call_program(
+                    ["--gauge", text, str(height), str(width), str(percent)],
+                    redir_child_stdin_from_fd=child_stdin_rfd,
+                    close_fds=(child_stdin_wfd,), **kwargs)
+            except BaseException:
+                # Don't leak the pipe if _call_program() failed. Cleanup
+                # errors must not mask the original exception.
+                for fd in (child_stdin_rfd, child_stdin_wfd):
+                    try:
+                        os.close(fd)
+                    except OSError:
+                        pass
+                raise
 
             # fork() is done. We don't need child_stdin_rfd in the father
             # process anymore.
@@ -2632,7 +2690,7 @@ by :program:`dialog`.
             self._gauge_process["stdin"].flush()
 
     # For "compatibility" with the old dialog.py...
-    def gauge_iterate(*args, **kwargs):
+    def gauge_iterate(self, *args, **kwargs):
         """Update a running gauge box.
 
         .. deprecated:: 2.03
@@ -2641,7 +2699,7 @@ by :program:`dialog`.
         """
         warnings.warn("Dialog.gauge_iterate() has been obsolete for "
                       "many years", DeprecationWarning)
-        gauge_update(*args, **kwargs)
+        self.gauge_update(*args, **kwargs)
 
     @widget
     @retval_is_code
@@ -2871,6 +2929,10 @@ by :program:`dialog`.
                     "'output' does not start with 'RENAMED ': {0!r}".format(
                         output))
             t = output.split(' ', 2)
+            if len(t) != 3:
+                raise UnexpectedDialogOutput(
+                    "unexpected output after renaming an inputmenu entry "
+                    "(expected 'RENAMED <tag> <item>'): {0!r}".format(output))
             return ("renamed", t[1], t[2])
         else:
             return (code, None, None)
@@ -3273,6 +3335,73 @@ by :program:`dialog`.
             fd=fd, text=text, height=height, width=width, **kwargs)
 
     @widget
+    @retval_is_code
+    def prgbox(self, text, command=None, height=None, width=None, **kwargs):
+        """Display the output of a command in a dialog box.
+
+        :param str text:
+          caption displayed above the command output, or the command
+          itself if *command* is not given
+        :param str command: command whose output is displayed
+        :param height:      height of the box
+        :type height:       int or ``None``
+        :param width:       width of the box
+        :type width:        int or ``None``
+        :return:            a :term:`Dialog exit code`
+        :rtype:             str
+
+        This widget runs *command* and displays its output while it is
+        being produced, similarly to :meth:`programbox` (which reads
+        from a file or file descriptor instead).
+
+        Two calling conventions are supported, mirroring the
+        :option:`--prgbox` option of :program:`dialog`::
+
+            d.prgbox("Output of ls:", "ls -l", 20, 78)
+            d.prgbox("ls -l", height=20, width=78)
+
+        The first one displays a caption above the output; the second
+        one omits the caption.
+
+        Default values for the size parameters when the
+        :ref:`autowidgetsize <autowidgetsize>` option is disabled:
+        ``height=20, width=78``.
+
+        Notable exceptions:
+
+          any exception raised by :meth:`Dialog._perform`
+
+        .. versionadded:: 3.6
+
+        """
+        self._dialog_version_check("1.1-20110302", "the prgbox widget")
+
+        if command is None:
+            # prgbox(command, height=..., width=...)
+            command, text = text, None
+        elif not isinstance(command, str):
+            # prgbox(command, height, width): the second positional argument
+            # is the height, not the command.
+            text, command, height, width = None, text, command, height
+
+        if not isinstance(command, str):
+            raise BadPythonDialogUsage(
+                "the 'command' argument of prgbox() must be a string, "
+                "but {0!r} is not".format(command))
+        if text is not None and not isinstance(text, str):
+            raise BadPythonDialogUsage(
+                "the 'text' argument of prgbox() must be a string or None, "
+                "but {0!r} is not".format(text))
+
+        height, width = self._default_size((height, width), (20, 78))
+        args = ["--prgbox"]
+        if text is not None:
+            args.append(text)
+        args.extend([command, str(height), str(width)])
+
+        return self._widget_with_no_output("prgbox", args, kwargs)
+
+    @widget
     def radiolist(self, text, height=None, width=None, list_height=None,
                   choices=[], **kwargs):
         """Display a radiolist box.
@@ -3420,9 +3549,23 @@ by :program:`dialog`.
             help_data = self._parse_help(output, kwargs, raw_format=True)
             # The help output does not depend on whether --help-status was
             # passed (dialog 1.2-20130902).
-            return (code, int(help_data))
+            try:
+                value = int(help_data)
+            except ValueError as e:
+                raise UnexpectedDialogOutput(
+                    "the dialog-like program returned the following "
+                    "unexpected help output (an integer was expected) from "
+                    "the rangebox widget: {0!r}".format(help_data)) from e
+            return (code, value)
         elif code in (self.OK, self.EXTRA):
-            return (code, int(output))
+            try:
+                value = int(output)
+            except ValueError as e:
+                raise UnexpectedDialogOutput(
+                    "the dialog-like program returned the following "
+                    "unexpected output (an integer was expected) from the "
+                    "rangebox widget: {0!r}".format(output)) from e
+            return (code, value)
         else:
             return (code, None)
 
@@ -3525,7 +3668,58 @@ by :program:`dialog`.
             "tailbox",
             ["--tailbox", filepath, str(height), str(width)],
             kwargs)
-    # No tailboxbg widget, at least for now.
+    @widget
+    def tailboxbg(self, filepath, height=None, width=None, **kwargs):
+        """Display a file in the background, as with ``tail -f &``.
+
+        :param str filepath: path to a file, the contents of which is to
+                             be displayed in the box
+        :param height:       height of the box
+        :type height:        int or ``None``
+        :param width:        width of the box
+        :type width:         int or ``None``
+        :return: a tuple of the form :samp:`({code}, {pid})` where:
+
+          - *code* is a :term:`Dialog exit code`;
+          - *pid* is the process ID printed by :program:`dialog` when the
+            ``no_kill=True`` common option is used, or ``None`` otherwise.
+
+        :rtype: tuple
+
+        Contrary to :meth:`tailbox`, this widget can be put in the
+        background by :program:`dialog`. It is mostly useful in
+        combination with other widgets, which pythondialog does not
+        currently support (the :option:`--and-widget` option of
+        :program:`dialog` is not exposed).
+
+        Default values for the size parameters when the
+        :ref:`autowidgetsize <autowidgetsize>` option is disabled:
+        ``height=20, width=60``.
+
+        Notable exceptions:
+
+          - any exception raised by :meth:`Dialog._perform`
+          - :exc:`UnexpectedDialogOutput` if the backend prints something
+            else than a process ID when ``no_kill=True`` is used
+
+        .. versionadded:: 3.6
+
+        """
+        height, width = self._default_size((height, width), (20, 60))
+        code, output = self._perform(
+            ["--tailboxbg", filepath, str(height), str(width)], **kwargs)
+
+        pid = None
+        if output.strip():
+            try:
+                pid = int(output.strip())
+            except ValueError as e:
+                raise UnexpectedDialogOutput(
+                    "the dialog-like program returned unexpected output "
+                    "instead of a process ID from the tailboxbg widget: "
+                    "{0!r}".format(output)) from e
+
+        return (code, pid)
 
     @widget
     @retval_is_code
@@ -3676,7 +3870,7 @@ by :program:`dialog`.
         Display nodes organized in a tree structure. Each node has a
         *tag*, an *item* text, a selected *status*, and a *depth* in
         the tree. Only the *item* texts are displayed in the widget;
-        *tag*\s are only used for the return value. Only one node can
+        *tag* values are only used for the return value. Only one node can
         be selected at a given time, as for the :meth:`radiolist`
         widget.
 

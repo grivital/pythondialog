@@ -61,7 +61,7 @@ Text box
 Scroll box
 ^^^^^^^^^^
 
-.. Automethod:: Dialog.scrollbox
+.. automethod:: Dialog.scrollbox
 
 .. figure:: screenshots/scrollbox.png
    :align: center
@@ -104,6 +104,12 @@ Program box
    :meth:`~Dialog.programbox` example
 
 
+Command box
+^^^^^^^^^^^
+
+.. automethod:: Dialog.prgbox
+
+
 Tail box
 ^^^^^^^^
 
@@ -113,6 +119,12 @@ Tail box
    :align: center
 
    :meth:`~Dialog.tailbox` example
+
+
+Background tail box
+^^^^^^^^^^^^^^^^^^^
+
+.. automethod:: Dialog.tailboxbg
 
 
 

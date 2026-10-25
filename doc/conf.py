@@ -41,7 +41,9 @@ extensions = [
     'sphinx.ext.viewcode',
 ]
 
-intersphinx_mapping = {'python': ('https://docs.python.org/3', None)}
+# Keep this empty for offline/reproducible documentation builds (the Gentoo
+# ebuild and the test environment must not fetch anything from the network).
+intersphinx_mapping = {}
 
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ['_templates']
@@ -58,7 +60,7 @@ master_doc = 'index'
 # General information about the project.
 project = 'pythondialog'
 # This applies to the documentation, according to the Sphinx output.
-copyright = '2002-2019, Florent Rougon, Thomas Dickey'
+copyright = '2002-2026, Florent Rougon, Thomas Dickey, Vitaly Grinin'
 
 # The version info for the project you're documenting, acts as replacement for
 # |version| and |release|, also used in various other places throughout the
@@ -113,11 +115,9 @@ pygments_style = 'sphinx'
 # -- Options for HTML output ----------------------------------------------
 
 # The theme to use for HTML and HTML Help pages.  See the documentation for
-# a list of builtin themes.
-if sphinx.version_info >= (1, 3, 0, 'beta', 3):
-    html_theme = 'classic'
-else:
-    html_theme = 'default'
+# a list of builtin themes. 'alabaster' is the default theme shipped with
+# modern Sphinx versions.
+html_theme = 'alabaster'
 
 # Theme options are theme-specific and customize the look and feel of a theme
 # further.  For a list of options available for each theme, see the
